@@ -1,13 +1,12 @@
-/*
-  channel_state.h — единственное место, где хранится "источник истины"
-  по 16 каналам (rc_channels_us), плюс перевод JSON <-> этот массив.
-
-  Раньше глобальный массив rc_channels_us и функции его чтения/записи
-  из JSON были в том же файле, что transport и CRSF-протокол. Теперь
-  это отдельный, маленький и легко читаемый модуль — "модель данных"
-  проекта. И ws_transport, и crsf_protocol используют только этот
-  массив, не зная друг о друге напрямую.
-*/
+/**
+ * @file channel_state.h
+ * @brief Модель данных: массив текущих значений 16 каналов
+ *        (rc_channels_us) плюс перевод JSON <-> этот массив.
+ *
+ * Единственное место, где хранится "источник истины" по каналам.
+ * И ws_transport, и crsf_protocol используют только этот массив, не
+ * зная друг о друге напрямую.
+ */
 
 #pragma once
 
@@ -17,8 +16,17 @@
 
 namespace state {
 
+/** Текущие значения всех 16 каналов в микросекундах (1000..2000). */
 static uint16_t rc_channels_us[TOTAL_CHANNELS];
 
+/**
+ * @brief Установить значения всех каналов по умолчанию при старте
+ *        прошивки: центр для ROLL/PITCH/YAW, минимум для THROTTLE и
+ *        минимум для всех AUX-каналов (безопасное состояние перед армингом).
+ *
+ * @param нет аргументов.
+ * @return void. Результат — заполненный глобальный массив rc_channels_us.
+ */
 inline void init_defaults() {
     rc_channels_us[ROLL] = 1500;
     rc_channels_us[PITCH] = 1500;
@@ -27,8 +35,14 @@ inline void init_defaults() {
     for (int i = AUX_START; i < TOTAL_CHANNELS; i++) rc_channels_us[i] = 1000;
 }
 
-// Собирает {"channels": [16 значений]} — отправляется GUI при подключении
-// и после каждого принятого сообщения.
+/**
+ * @brief Собрать JSON-строку с текущим состоянием всех каналов для
+ *        отправки в GUI (при подключении и после каждого изменения).
+ *
+ * @param нет аргументов (читает глобальный rc_channels_us).
+ * @return String JSON вида {"channels": [v0, v1, ..., v15]}, где vN —
+ *                значение канала N в микросекундах.
+ */
 inline String build_state_json() {
     StaticJsonDocument<400> doc;
     JsonArray arr = doc.createNestedArray("channels");
@@ -38,8 +52,17 @@ inline String build_state_json() {
     return out;
 }
 
-// Разбирает {"channel": 1..16, "value": 1000..2000} от GUI и обновляет
-// массив каналов. Возвращает true, если что-то реально изменилось.
+/**
+ * @brief Разобрать сообщение от GUI вида {"channel": N, "value": V} и,
+ *        если оно валидно, обновить соответствующий канал в rc_channels_us.
+ *
+ * @param text Сырая JSON-строка, полученная по WebSocket от GUI.
+ * @return bool true, если сообщение успешно разобрано, канал (1..16) и
+ *              значение (1000..2000) прошли валидацию и массив каналов
+ *              был обновлён; false при ошибке разбора JSON или выходе
+ *              значений за допустимые границы (в этом случае состояние
+ *              не меняется).
+ */
 inline bool apply_client_message(const String& text) {
     StaticJsonDocument<128> doc;
     DeserializationError err = deserializeJson(doc, text);

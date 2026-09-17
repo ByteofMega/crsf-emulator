@@ -1,12 +1,12 @@
 """
 main.py — точка входа и "клей" между модулями.
 
-Обновлено: добавлена TelemetryPanel, подписанная на
-ws_client.telemetry_received — теперь GUI показывает не только то, что
-сам отправил (RC-каналы), но и реальные данные, пришедшие от полетного
-контроллера / дрона (батарея, углы, режим полета, качество линка).
-Если на дроне сейчас не "базовые" значения (например, включен RTH или
-батарея разряжена не по умолчанию) — это будет видно в этой панели.
+MainWindow занимается только компоновкой виджетов (панель подключения +
+TelemetryPanel + ChannelPanel) и подпиской на сигналы:
+  ChannelPanel.value_changed  -> ws_client.send_channel
+  ws_client.channels_received -> ChannelPanel.set_all_silent
+  ws_client.telemetry_received -> TelemetryPanel.update_telemetry
+  ws_client.connected/disconnected/error_occurred -> обновление статус-лейбла
 
 Установка зависимостей:
     pip install PyQt6 PyQt6-WebSockets
@@ -26,7 +26,18 @@ from ws_client import CrsfWsClient
 
 
 class MainWindow(QMainWindow):
+    """Главное окно приложения: панель подключения + телеметрия + каналы.
+
+    Не содержит сетевой логики (делегирует её в CrsfWsClient) и не
+    содержит логики отрисовки отдельных каналов (делегирует в
+    ChannelPanel/TelemetryPanel) — только компонует их и связывает сигналами.
+    """
+
     def __init__(self):
+        """Построить интерфейс окна и подключить сигналы между модулями.
+
+        Аргументы: нет (стандартный конструктор без параметров).
+        """
         super().__init__()
         self.setWindowTitle("ELRS CRSF Emulator — ESP32 WebSocket GUI")
         self.resize(600, 780)
@@ -78,6 +89,16 @@ class MainWindow(QMainWindow):
     # ---------- обработчики UI ----------
 
     def _toggle_connection(self):
+        """Обработать нажатие кнопки «Подключиться»/«Отключиться».
+
+        Аргументы: нет.
+
+        Возвращает:
+            None. Если уже подключены — инициирует отключение. Если нет —
+            валидирует введённые IP/порт и вызывает ws_client.connect_to().
+            При ошибке валидации выводит сообщение в status_label и
+            прерывает выполнение.
+        """
         if self.ws_client.is_connected():
             self.ws_client.disconnect_from_host()
             return
@@ -98,21 +119,50 @@ class MainWindow(QMainWindow):
     # ---------- обработчики ws_client ----------
 
     def _on_connected(self):
+        """Обновить UI после успешного подключения к ESP32.
+
+        Аргументы: нет. Возвращает: None.
+        """
         self.status_label.setText("Подключено")
         self.connect_btn.setText("Отключиться")
 
     def _on_disconnected(self):
+        """Обновить UI после разрыва соединения с ESP32.
+
+        Аргументы: нет. Возвращает: None.
+        """
         self.status_label.setText("Отключено")
         self.connect_btn.setText("Подключиться")
 
     def _on_error(self, message: str):
+        """Показать пользователю текст сетевой ошибки.
+
+        Аргументы:
+            message (str): человекочитаемое описание ошибки от CrsfWsClient.
+
+        Возвращает:
+            None.
+        """
         self.status_label.setText(f"Ошибка: {message}")
 
     def _on_channels_received(self, values: list):
+        """Применить полученное от ESP32 состояние каналов к панели.
+
+        Аргументы:
+            values (list[int]): список из NUM_CHANNELS значений в микросекундах.
+
+        Возвращает:
+            None.
+        """
         self.channel_panel.set_all_silent(values)
 
 
 def main():
+    """Точка входа приложения: создать QApplication, окно и запустить цикл событий.
+
+    Аргументы: нет.
+    Возвращает: None (процесс завершается через sys.exit с кодом выхода Qt).
+    """
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

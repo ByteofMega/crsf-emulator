@@ -1,23 +1,19 @@
-/*
-  telemetry.h — приём телеметрии от полетного контроллера по тому же
-  UART (Serial2), по которому мы отправляем RC-каналы.
-
-  CRSF — двунаправленный протокол: FC сам присылает кадры телеметрии
-  (батарея, углы, режим полета, статистика линка, GPS) через тот же
-  провод RX2 ESP32 <- TX FC, который уже подключен для основного канала
-  управления. Дополнительных проводов/пинов не требуется.
-
-  Модуль читает байты из CRSF_SERIAL по кадрам (sync + length + type +
-  payload + crc8), разбирает несколько самых полезных типов и хранит
-  последние значения в telemetry::state. .ino дергает telemetry::poll()
-  в каждой итерации loop() и telemetry::build_json() раз в N мс, чтобы
-  переслать данные в GUI по WebSocket.
-
-  ВАЖНО: единицы измерения (deciVolt/deciAmp и т.п.) для батареи взяты
-  из типичных реализаций CRSF/Betaflight. Если цифры на GUI выглядят
-  в 10 раз больше/меньше реальных — поправьте делители VOLTAGE_DIV /
-  CURRENT_DIV ниже под вашу прошивку FC.
-*/
+/**
+ * @file telemetry.h
+ * @brief Приём телеметрии от полётного контроллера по тому же UART
+ *        (Serial2), по которому отправляются RC-каналы.
+ *
+ * CRSF — двунаправленный протокол: FC сам присылает кадры телеметрии
+ * (батарея, углы, режим полёта, статистика линка, GPS) через тот же
+ * провод RX2 ESP32 <- TX FC. Модуль читает байты из CRSF_SERIAL по
+ * кадрам (sync + length + type + payload + crc8), разбирает несколько
+ * самых полезных типов и хранит последние значения в telemetry::state.
+ *
+ * ВАЖНО: единицы измерения (deciVolt/deciAmp и т.п.) для батареи взяты
+ * из типичных реализаций CRSF/Betaflight. Если цифры на GUI выглядят
+ * в 10 раз больше/меньше реальных — поправьте делители VOLTAGE_DIV /
+ * CURRENT_DIV ниже под вашу прошивку FC.
+ */
 
 #pragma once
 
@@ -34,10 +30,11 @@ namespace telemetry {
 #define CRSF_FRAMETYPE_ATTITUDE 0x1E
 #define CRSF_FRAMETYPE_FLIGHT_MODE 0x21
 
-#define VOLTAGE_DIV 10.0f   // сырое значение в 0.1 В -> Вольты
-#define CURRENT_DIV 10.0f   // сырое значение в 0.1 А -> Амперы
-#define ATTITUDE_DIV 10000.0f  // сырое значение в радианах*10000 -> радианы
+#define VOLTAGE_DIV 10.0f       ///< сырое значение в 0.1 В -> Вольты
+#define CURRENT_DIV 10.0f       ///< сырое значение в 0.1 А -> Амперы
+#define ATTITUDE_DIV 10000.0f   ///< сырое значение в радианах*10000 -> радианы
 
+/** Последние принятые значения телеметрии по каждой категории. */
 struct State {
     bool has_battery = false;
     float voltage_v = 0;
@@ -56,13 +53,39 @@ struct State {
     int8_t uplink_snr = 0;
 };
 
+/** Глобальное хранилище последних значений телеметрии. */
 static State state;
 
-// ---------- вспомогательные функции чтения big-endian из payload ----------
+/**
+ * @brief Прочитать 16-битное знаковое число в формате big-endian.
+ * @param p Указатель на первый (старший) байт числа.
+ * @return int16_t Прочитанное значение.
+ */
 inline int16_t read_i16(const uint8_t* p) { return (int16_t)((p[0] << 8) | p[1]); }
+
+/**
+ * @brief Прочитать 16-битное беззнаковое число в формате big-endian.
+ * @param p Указатель на первый (старший) байт числа.
+ * @return uint16_t Прочитанное значение.
+ */
 inline uint16_t read_u16(const uint8_t* p) { return (uint16_t)((p[0] << 8) | p[1]); }
+
+/**
+ * @brief Прочитать 24-битное беззнаковое число в формате big-endian.
+ * @param p Указатель на первый (старший) байт трёхбайтного числа.
+ * @return uint32_t Прочитанное значение (используются младшие 24 бита).
+ */
 inline uint32_t read_u24(const uint8_t* p) { return ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2]; }
 
+/**
+ * @brief Разобрать payload одного CRSF-кадра телеметрии по его типу и
+ *        обновить соответствующие поля в глобальном state.
+ *
+ * @param type    Байт типа кадра (например CRSF_FRAMETYPE_BATTERY).
+ * @param payload Указатель на начало payload кадра (без sync/length/type/crc).
+ * @param len     Длина payload в байтах.
+ * @return void. Неизвестные типы кадров молча игнорируются (case default).
+ */
 inline void handle_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
     switch (type) {
         case CRSF_FRAMETYPE_BATTERY:
@@ -106,9 +129,19 @@ inline void handle_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
     }
 }
 
-// ---------- разбор потока байт по кадрам ----------
-// Простой блокирующий по одному кадру парсер: вызывается часто из loop(),
-// поэтому не тратит много времени за один вызов.
+/**
+ * @brief Прочитать все доступные байты из CRSF_SERIAL и собрать их в
+ *        полные CRSF-кадры, проверяя CRC и вызывая handle_frame() для
+ *        каждого успешно собранного кадра.
+ *
+ * Использует статический буфер и индекс между вызовами, поэтому
+ * рассчитан на частый вызов из loop() небольшими порциями, а не на
+ * блокирующее ожидание целого кадра.
+ *
+ * @param нет аргументов.
+ * @return void. Результат — обновлённый telemetry::state при получении
+ *              валидных кадров.
+ */
 inline void poll() {
     static uint8_t buf[64];
     static size_t idx = 0;
@@ -147,7 +180,16 @@ inline void poll() {
     }
 }
 
-// ---------- JSON для отправки в GUI ----------
+/**
+ * @brief Собрать JSON-строку с накопленной телеметрией для отправки в GUI.
+ *
+ * Каждая категория (battery/attitude/flight_mode/link) включается в
+ * JSON только если для неё уже был получен хотя бы один валидный кадр
+ * (флаги has_* в telemetry::state).
+ *
+ * @param нет аргументов (читает глобальный telemetry::state).
+ * @return String JSON вида {"telemetry": {"battery": {...}, ...}}.
+ */
 inline String build_json() {
     StaticJsonDocument<300> doc;
     JsonObject t = doc.createNestedObject("telemetry");

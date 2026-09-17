@@ -1,17 +1,18 @@
-/*
-  ws_transport.h — весь низкоуровневый WebSocket-сервер (RFC 6455) в
-  одном модуле, полностью отделенном от протокола CRSF.
-
-  Раньше base64, SHA1-handshake, разбор входящих кадров и сборка JSON
-  состояния были перемешаны в одном .ino вместе с CRC8 и отправкой
-  CRSF-кадров. Теперь этот файл отвечает только за "сырой" транспорт:
-  принять TCP-клиента, сделать handshake, прочитать текстовый кадр,
-  отправить текстовый кадр. Он ничего не знает про каналы/CRSF — им
-  занимается channel_state, который вызывается из .ino как callback.
-
-  ТРЕБУЕМАЯ БИБЛИОТЕКА: ArduinoJson (Benoit Blanchon) — используется
-  только здесь, для build_state_json() и разбора входящих сообщений.
-*/
+/**
+ * @file ws_transport.h
+ * @brief Низкоуровневый WebSocket-сервер (RFC 6455) на встроенных
+ *        WiFiServer/WiFiClient, без сторонних библиотек AsyncTCP/
+ *        ESPAsyncWebServer.
+ *
+ * Модуль отвечает только за "сырой" транспорт: принять TCP-клиента,
+ * сделать handshake, прочитать текстовый кадр, отправить текстовый кадр.
+ * Он ничего не знает про каналы/CRSF — этим занимается channel_state.h,
+ * вызываемый из .ino как callback.
+ *
+ * ТРЕБУЕМАЯ БИБЛИОТЕКА: ArduinoJson (Benoit Blanchon) — используется
+ * только для этого модуля не нужна напрямую, но подключается транзитивно
+ * через channel_state.h/telemetry.h.
+ */
 
 #pragma once
 
@@ -23,7 +24,15 @@
 
 namespace ws {
 
-// ---------- Base64 (только для ответа на handshake) ----------
+/**
+ * @brief Закодировать блок байт в строку Base64 (нужно только для ответа
+ *        на WebSocket handshake, поле Sec-WebSocket-Accept).
+ *
+ * @param data Указатель на исходные байты для кодирования.
+ * @param len  Количество байт в data.
+ * @return String Результат кодирования в стандартном алфавите Base64,
+ *                с паддингом '=' при необходимости.
+ */
 inline String base64_encode(const uint8_t* data, size_t len) {
     static const char* chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -49,7 +58,13 @@ inline String base64_encode(const uint8_t* data, size_t len) {
     return out;
 }
 
-// ---------- Sec-WebSocket-Accept по ключу клиента (RFC 6455) ----------
+/**
+ * @brief Вычислить значение заголовка Sec-WebSocket-Accept по ключу
+ *        клиента согласно RFC 6455 (SHA1 от key+GUID, затем Base64).
+ *
+ * @param client_key Значение заголовка Sec-WebSocket-Key из запроса клиента.
+ * @return String Готовое значение для заголовка Sec-WebSocket-Accept ответа.
+ */
 inline String compute_ws_accept(const String& client_key) {
     const char* GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     String combined = client_key + GUID;
@@ -65,7 +80,14 @@ inline String compute_ws_accept(const String& client_key) {
     return base64_encode(sha1_result, 20);
 }
 
-// ---------- Отправка текстового кадра серверу -> клиенту (без маски) ----------
+/**
+ * @brief Отправить один текстовый WebSocket-кадр от сервера клиенту
+ *        (без маскирования — по протоколу сервер клиенту маску не ставит).
+ *
+ * @param client Ссылка на подключённого TCP-клиента (GUI).
+ * @param text   Текст сообщения для отправки (обычно JSON-строка).
+ * @return void. Если клиент не подключён, вызов ничего не делает.
+ */
 inline void send_text(WiFiClient& client, const String& text) {
     if (!client.connected()) return;
 
@@ -91,7 +113,16 @@ inline void send_text(WiFiClient& client, const String& text) {
     client.write((const uint8_t*)text.c_str(), len);
 }
 
-// ---------- HTTP -> WebSocket handshake с новым клиентом ----------
+/**
+ * @brief Выполнить HTTP -> WebSocket handshake с только что подключившимся
+ *        TCP-клиентом: прочитать HTTP-заголовки, найти Sec-WebSocket-Key,
+ *        отправить корректный ответ 101 Switching Protocols.
+ *
+ * @param client Ссылка на TCP-клиента, с которым нужно выполнить handshake.
+ * @return bool true, если handshake успешно завершён и клиент готов к
+ *              обмену WebSocket-кадрами; false при таймауте (2 секунды)
+ *              или отсутствии заголовка Sec-WebSocket-Key.
+ */
 inline bool try_handshake(WiFiClient& client) {
     String request;
     uint32_t start = millis();
@@ -127,7 +158,18 @@ headers_done:
     return true;
 }
 
-// ---------- Разбор одного входящего кадра от клиента (с маской) ----------
+/**
+ * @brief Прочитать и разобрать один входящий WebSocket-кадр от клиента
+ *        (кадры от клиента к серверу всегда маскированы согласно RFC 6455).
+ *
+ * @param client   Ссылка на подключённого и прошедшего handshake клиента.
+ * @param out_text Ссылка на строку, куда будет записан демаскированный
+ *                 текст сообщения при успешном разборе.
+ * @return bool true, если удалось прочитать и демаскировать текстовый
+ *              кадр (opcode 0x1); false при недостатке данных, слишком
+ *              большом payload (> WS_MAX_PAYLOAD), кадре закрытия
+ *              (opcode 0x8) или любом нетекстовом кадре.
+ */
 inline bool read_frame(WiFiClient& client, String& out_text) {
     if (client.available() < 2) return false;
 

@@ -3,16 +3,28 @@ telemetry_panel.py — виджет для отображения телемет
 
 Как и ChannelPanel, этот виджет ничего не знает о WebSocket: он только
 показывает данные и предоставляет метод update_telemetry(dict), который
-main.py вызывает по сигналу ws_client.telemetry_received. Так реальные
-показания дрона (батарея, углы, режим полета, качество линка) окажутся
-в интерфейсе, даже если они отличаются от "базовых" значений по умолчанию.
+main.py вызывает по сигналу ws_client.telemetry_received.
 """
 
 from PyQt6.QtWidgets import QFormLayout, QGroupBox, QLabel, QVBoxLayout, QWidget
 
 
 class TelemetryPanel(QWidget):
+    """Панель с текущими показаниями телеметрии полётного контроллера.
+
+    Отображает четыре группы данных: батарею, углы ориентации, текущий
+    режим полёта и качество радиолинка. Каждая группа обновляется
+    независимо — если в очередном пакете телеметрии какого-то поля нет,
+    соответствующая метка просто не обновляется (сохраняет предыдущее
+    значение).
+    """
+
     def __init__(self, parent=None):
+        """Создать панель с четырьмя пустыми полями телеметрии.
+
+        Аргументы:
+            parent (QWidget | None): родительский виджет Qt, по умолчанию None.
+        """
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
@@ -33,6 +45,21 @@ class TelemetryPanel(QWidget):
         layout.addWidget(box)
 
     def update_telemetry(self, telemetry: dict):
+        """Обновить отображаемые значения на основе пакета телеметрии.
+
+        Аргументы:
+            telemetry (dict): словарь, полученный из сигнала
+                CrsfWsClient.telemetry_received. Поддерживаемые
+                необязательные ключи:
+                  - "battery" (dict): voltage_v (float), current_a (float),
+                    capacity_mah (int), percent (int).
+                  - "attitude" (dict): pitch, roll, yaw (float, радианы).
+                  - "flight_mode" (str): название текущего режима полёта.
+                  - "link" (dict): rssi (int), lq (int), snr (int).
+
+        Возвращает:
+            None. Отсутствующие ключи просто пропускаются без ошибок.
+        """
         battery = telemetry.get("battery")
         if battery:
             self.battery_label.setText(

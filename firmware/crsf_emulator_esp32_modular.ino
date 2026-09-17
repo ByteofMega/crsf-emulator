@@ -1,14 +1,23 @@
-/*
-  crsf_emulator_esp32_modular.ino — точка входа прошивки.
-
-  Модули:
-    config.h         — константы и пины
-    channel_state.h  — модель данных каналов (GUI -> FC) + JSON
-    crsf_protocol.h  — кодирование CRSF-кадра и отправка каналов по UART
-    ws_transport.h   — низкоуровневый WebSocket-сервер
-    telemetry.h      — прием телеметрии (FC -> GUI) по тому же UART
-
-*/
+/**
+ * @file crsf_emulator_esp32_modular.ino
+ * @brief Точка входа прошивки: setup() поднимает Wi-Fi/UART/WebSocket-
+ *        сервер, loop() каждые FRAME_PERIOD_MS отправляет CRSF-кадр,
+ *        обслуживает GUI-клиента и периодически шлёт телеметрию.
+ *
+ * Модули:
+ *   config.h         — константы и пины
+ *   channel_state.h  — модель данных каналов (GUI -> FC) + JSON
+ *   crsf_protocol.h  — кодирование CRSF-кадра и отправка каналов по UART
+ *   ws_transport.h   — низкоуровневый WebSocket-сервер
+ *   telemetry.h      — прием телеметрии (FC -> GUI) по тому же UART
+ *
+ * Настройка Betaflight (один раз в CLI):
+ *   feature RX_SERIAL
+ *   set serialrx_provider = CRSF
+ *   save
+ * Убедитесь, что порт помечен как "Serial RX" и Half-Duplex выключен,
+ * иначе телеметрия от FC на RX2 приходить не будет.
+ */
 
 #include <WiFi.h>
 
@@ -18,7 +27,8 @@
 #include "ws_transport.h"
 #include "telemetry.h"
 
-#define TELEMETRY_SEND_PERIOD_MS 200  // ~5 Гц в GUI, кадры от FC читаются каждый loop()
+/** Период отправки накопленной телеметрии в GUI, мс (~5 Гц). */
+#define TELEMETRY_SEND_PERIOD_MS 200
 
 WiFiServer wsServer(WS_PORT);
 WiFiClient wsClient;
@@ -26,6 +36,15 @@ bool wsHandshakeDone = false;
 uint32_t last_frame_ms = 0;
 uint32_t last_telemetry_send_ms = 0;
 
+/**
+ * @brief Обслужить одного WebSocket-клиента (GUI): принять нового
+ *        TCP-клиента при необходимости, выполнить handshake, прочитать
+ *        одно входящее сообщение и, если состояние изменилось, отправить
+ *        клиенту актуальный JSON с каналами.
+ *
+ * @param нет аргументов (использует глобальные wsServer/wsClient/wsHandshakeDone).
+ * @return void.
+ */
 void poll_websocket() {
     if (!wsClient || !wsClient.connected()) {
         WiFiClient newClient = wsServer.available();
@@ -56,9 +75,15 @@ void poll_websocket() {
     }
 }
 
-// Раз в TELEMETRY_SEND_PERIOD_MS шлет накопленную телеметрию в GUI,
-// если клиент подключен. Отдельное сообщение с ключом "telemetry",
-// не путается с {"channels":[...]} на стороне Python.
+/**
+ * @brief Раз в TELEMETRY_SEND_PERIOD_MS отправить накопленную телеметрию
+ *        подключённому GUI-клиенту отдельным сообщением {"telemetry": {...}}.
+ *
+ * @param нет аргументов (использует глобальные wsClient/wsHandshakeDone
+ *            и telemetry::state через telemetry::build_json()).
+ * @return void. Если клиент не подключён или период ещё не истёк,
+ *              функция ничего не делает.
+ */
 void push_telemetry_if_due() {
     uint32_t now = millis();
     if (now - last_telemetry_send_ms < TELEMETRY_SEND_PERIOD_MS) return;
@@ -69,6 +94,14 @@ void push_telemetry_if_due() {
     }
 }
 
+/**
+ * @brief Стандартная точка инициализации Arduino: настраивает Serial,
+ *        CRC8-таблицу, значения каналов по умолчанию, UART к FC,
+ *        подключается к Wi-Fi и поднимает WebSocket-сервер.
+ *
+ * @param нет аргументов (вызывается средой Arduino один раз при старте).
+ * @return void.
+ */
 void setup() {
     Serial.begin(115200);
 
@@ -95,6 +128,15 @@ void setup() {
     last_frame_ms = millis();
 }
 
+/**
+ * @brief Стандартный главный цикл Arduino: с частотой FRAME_PERIOD_MS
+ *        отправляет CRSF-кадр на FC, а также опрашивает входящую
+ *        телеметрию, обслуживает GUI-клиента и периодически шлёт
+ *        телеметрию в GUI.
+ *
+ * @param нет аргументов (вызывается средой Arduino в бесконечном цикле).
+ * @return void.
+ */
 void loop() {
     uint32_t now = millis();
     if (now - last_frame_ms >= FRAME_PERIOD_MS) {
