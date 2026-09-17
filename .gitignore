@@ -1,0 +1,42 @@
+# ---------- Python (GUI) ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ---------- Arduino / PlatformIO (firmware) ----------
+.pio/
+.pioenvs/
+.piolibdeps/
+*.hex
+*.bin
+*.elf
+*.map
+build/
+
+# ---------- Секреты ----------
+# Wi-Fi credentials и прочие приватные данные не должны попадать в репозиторий.
+# Рекомендуется вынести WIFI_SSID/WIFI_PASSWORD из config.h в отдельный
+# secrets.h, добавленный сюда, и коммитить только secrets.h.example.
+firmware/secrets.h
+
+# ---------- IDE / редакторы ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---------- Логи ----------
+*.log
