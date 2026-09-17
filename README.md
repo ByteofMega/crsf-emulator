@@ -48,7 +48,6 @@ WiFiClient — без сторонних библиотек AsyncTCP/ESPAsyncWeb
 │   ├── telemetry_panel.py                # панель телеметрии
 │   └── requirements.txt
 ├── .gitignore
-├── LICENSE
 └── README.md
 ```
 
