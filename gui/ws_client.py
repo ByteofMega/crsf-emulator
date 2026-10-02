@@ -1,157 +1,112 @@
-"""
-ws_client.py — вся сетевая логика (WebSocket) отделена от GUI.
+"""ws_client.py - сетевая логика WebSocket (GUI <-> ESP32).
 
-ESP32 присылает два вида сообщений:
-  {"channels": [16 значений]}      -> сигнал channels_received
-  {"telemetry": {...}}             -> сигнал telemetry_received
-
-Оба разбираются в одном месте (_on_message), GUI просто подписывается
-на нужный сигнал и не заботится о формате JSON.
+Каналы RC, настройки Wi-Fi, MSP-кадры от FC, диагностика обмена и проброс CLI идут по одному WebSocket.
+last_msp_time - время (time.monotonic) последнего корректного MSP-кадра от FC: по нему CLI-клиент проверяет,
+что FC жива и в режиме MSP, прежде чем входить в CLI.
 """
 
 import json
+import time
 
 from PyQt6.QtCore import QObject, QUrl, pyqtSignal
 from PyQt6.QtNetwork import QAbstractSocket
 from PyQt6.QtWebSockets import QWebSocket
 
 from config import NUM_CHANNELS
+from msp_codes import READ_CODES
 
 
 class CrsfWsClient(QObject):
-    """Обертка над QWebSocket со специализированными сигналами для CRSF-протокола.
-
-    Инкапсулирует детали протокола (формат JSON-пакетов, состояние сокета)
-    и предоставляет вызывающему коду (GUI) только высокоуровневые сигналы
-    и методы, не завязанные на конкретную реализацию транспорта.
-    """
-
     connected = pyqtSignal()
-    """Сигнал: WebSocket-соединение с ESP32 успешно установлено."""
-
     disconnected = pyqtSignal()
-    """Сигнал: соединение с ESP32 разорвано (по инициативе любой из сторон)."""
-
     error_occurred = pyqtSignal(str)
-    """Сигнал: произошла сетевая ошибка.
-
-    Аргументы:
-        str: человекочитаемое описание ошибки (из QWebSocket.errorString()).
-    """
-
     channels_received = pyqtSignal(list)
-    """Сигнал: от ESP32 пришло полное состояние всех каналов.
-
-    Аргументы:
-        list[int]: список из NUM_CHANNELS значений в микросекундах (1000..2000),
-            в порядке ROLL, PITCH, THROTTLE, YAW, AUX1..AUX12.
-    """
-
     telemetry_received = pyqtSignal(dict)
-    """Сигнал: от ESP32 пришёл пакет телеметрии с полётного контроллера.
-
-    Аргументы:
-        dict: словарь с необязательными ключами "battery", "attitude",
-            "flight_mode", "link" — см. TelemetryPanel.update_telemetry().
-    """
+    msp_received = pyqtSignal(int, bytes, bool)  # cmd, payload, err
+    msp_diag = pyqtSignal(dict)                  # счётчики обмена ESP32 <-> FC
+    cli_output = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        """Создать клиент и подписаться на внутренние сигналы QWebSocket.
-
-        Аргументы:
-            parent (QObject | None): родительский Qt-объект для управления
-                временем жизни (стандартный параметр PyQt), по умолчанию None.
-        """
         super().__init__(parent)
+        self.cli_mode = False
+        self.last_msp_time = 0.0
         self._ws = QWebSocket()
         self._ws.connected.connect(self.connected.emit)
-        self._ws.disconnected.connect(self.disconnected.emit)
+        self._ws.disconnected.connect(self._on_disconnected)
         self._ws.textMessageReceived.connect(self._on_message)
         self._ws.errorOccurred.connect(self._on_error)
 
-    # ---------- публичное API ----------
-
     def is_connected(self) -> bool:
-        """Проверить, установлено ли сейчас соединение с ESP32.
-
-        Возвращает:
-            bool: True, если сокет в состоянии ConnectedState, иначе False.
-        """
         return self._ws.state() == QAbstractSocket.SocketState.ConnectedState
 
     def connect_to(self, ip: str, port: int):
-        """Начать асинхронное подключение к WebSocket-серверу ESP32.
-
-        Аргументы:
-            ip (str): IP-адрес ESP32 в локальной сети (например "192.168.1.42").
-            port (int): TCP-порт WebSocket-сервера ESP32 (по умолчанию 81).
-
-        Возвращает:
-            None. Результат подключения приходит асинхронно через сигналы
-            connected / error_occurred.
-        """
-        url = QUrl(f"ws://{ip}:{port}/")
-        self._ws.open(url)
+        self._ws.open(QUrl(f"ws://{ip}:{port}/"))
 
     def disconnect_from_host(self):
-        """Закрыть текущее WebSocket-соединение с ESP32.
-
-        Аргументы: нет.
-        Возвращает: None. Разрыв соединения подтверждается сигналом disconnected.
-        """
         self._ws.close()
 
-    def send_channel(self, channel_index: int, value: int):
-        """Отправить на ESP32 новое значение одного канала.
-
-        Аргументы:
-            channel_index (int): 0-based индекс канала (0..15), то есть
-                0 = ROLL, 1 = PITCH, ..., 15 = AUX12.
-            value (int): новое значение канала в микросекундах (1000..2000).
-
-        Возвращает:
-            None. Если соединение не установлено, вызов молча игнорируется.
-        """
+    def _send(self, obj: dict) -> bool:
         if not self.is_connected():
-            return
-        payload = json.dumps({"channel": channel_index + 1, "value": value})
-        self._ws.sendTextMessage(payload)
+            return False
+        self._ws.sendTextMessage(json.dumps(obj))
+        return True
 
-    # ---------- внутренние обработчики ----------
+    def send_channel(self, channel_index: int, value: int):
+        self._send({"channel": channel_index + 1, "value": value})
+
+    def send_wifi_config(self, ssid, identity, username, password, enterprise=True) -> bool:
+        return self._send({"wifi": {"ssid": ssid, "identity": identity, "username": username,
+                                    "password": password, "enterprise": enterprise}})
+
+    def request_msp(self, cmd: int) -> bool:
+        """Запросить одну MSP-команду (только из READ_CODES - команды записи запрещены)."""
+        if cmd not in READ_CODES or self.cli_mode:
+            return False
+        return self._send({"msp_req": int(cmd)})
+
+    def cli_enter(self) -> bool:
+        self.cli_mode = True
+        return self._send({"cli": "enter"})
+
+    def cli_line(self, text: str) -> bool:
+        return self._send({"cli": "line", "text": text})
+
+    def cli_leave(self) -> bool:
+        self.cli_mode = False
+        return self._send({"cli": "leave"})
+
+    def _on_disconnected(self):
+        self.cli_mode = False
+        self.disconnected.emit()
 
     def _on_message(self, message: str):
-        """Разобрать входящее текстовое сообщение от ESP32 и вызвать нужный сигнал.
-
-        Аргументы:
-            message (str): сырое текстовое сообщение, полученное по WebSocket
-                (ожидается JSON вида {"channels": [...]} или {"telemetry": {...}}).
-
-        Возвращает:
-            None. При ошибке разбора JSON сообщение молча игнорируется.
-        """
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
             return
-
+        if "msp" in data:
+            m = data["msp"]
+            try:
+                err = bool(m.get("err", 0))
+                if not err:
+                    self.last_msp_time = time.monotonic()
+                self.msp_received.emit(int(m["cmd"]), bytes.fromhex(m.get("data", "")), err)
+            except (KeyError, ValueError):
+                pass
+            return
+        if "msp_diag" in data:
+            self.msp_diag.emit(data["msp_diag"])
+            return
+        if "cli_out" in data:
+            self.cli_output.emit(str(data["cli_out"]))
+            return
         channels = data.get("channels")
         if channels and len(channels) == NUM_CHANNELS:
             self.channels_received.emit([int(v) for v in channels])
             return
-
         telemetry = data.get("telemetry")
         if telemetry is not None:
             self.telemetry_received.emit(telemetry)
 
     def _on_error(self, _error_code):
-        """Обработать сигнал ошибки от внутреннего QWebSocket.
-
-        Аргументы:
-            _error_code: код ошибки Qt (QAbstractSocket.SocketError), не
-                используется напрямую — вместо него берётся текстовое
-                описание через self._ws.errorString().
-
-        Возвращает:
-            None. Транслирует ошибку наружу через сигнал error_occurred.
-        """
         self.error_occurred.emit(self._ws.errorString())

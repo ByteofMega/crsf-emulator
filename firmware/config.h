@@ -1,65 +1,78 @@
 /**
  * @file config.h
- * @brief Все настройки и константы прошивки в одном месте: Wi-Fi
- *        credentials, пины UART, параметры CRSF, имена каналов.
+ * @brief Все настройки и константы прошивки в одном месте.
  *
- * Единственный файл, который нужно открыть, чтобы поменять SSID/пароль,
- * пины или частоту обновления — остальной код их не хранит, а только
- * использует. Функций в этом файле нет — только константы и enum,
- * поэтому Doxygen-комментарии здесь поясняют назначение каждой группы.
+ * KFU.NET — сеть WPA2-Enterprise (802.1X), подключение по логину/паролю
+ * студента. Значения ниже — это НАЧАЛЬНЫЕ/резервные данные STA-сети:
+ * они используются один раз при первом старте (пока в NVS ничего не
+ * сохранено — см. netcfg.h), а затем их можно поменять из GUI через
+ * "Настройка Wi-Fi сети ESP32" без перепрошивки платы.
+ *
+ * Добавлено: ESP32 всегда поднимает собственную точку доступа
+ * AP_SSID/AP_PASS — ноутбук с GUI подключается СЮДА, а не к KFU.NET
+ * напрямую (обход изоляции клиентов корпоративной сети).
  */
 
 #pragma once
 
 #include <Arduino.h>
 
-// ---------- Wi-Fi ----------
-/** SSID точки доступа, к которой подключается ESP32. */
-static const char* WIFI_SSID = "GalaxyA35";
-/** Пароль точки доступа Wi-Fi. */
-static const char* WIFI_PASSWORD = "GahWer6539";
+// ---------- Wi-Fi: STA-сеть по умолчанию (используется при первом старте) ----------
+static const char* WIFI_SSID = "KFU.NET";
+
+// Внешний EAP-идентификатор (identity) — можно оставить таким же, как логин.
+static const char* WIFI_EAP_IDENTITY = "type_your_eap_identity";
+
+// Логин и пароль для входа в корпоративную сеть.
+static const char* WIFI_EAP_USERNAME = "type_your_eap_username";
+static const char* WIFI_EAP_PASSWORD = "type_your_password";
+
+// ---------- Собственная точка доступа ESP32 для ноутбука с GUI ----------
+// Ноутбук подключается СЮДА, а не к KFU.NET — это обходит изоляцию
+// клиентов корпоративной сети. Интернет на ноутбук идёт через NAT
+// (WiFi.AP.enableNAPT), см. .ino.
+static const char* AP_SSID = "FOTON-LINK";
+static const char* AP_PASS = "foton1234";  // минимум 8 символов для WPA2
+
+#define AP_IP_1 192
+#define AP_IP_2 168
+#define AP_IP_3 4
+#define AP_IP_4 1
+// IP ESP32 в собственной сети: 192.168.4.1 — именно этот адрес нужно
+// вводить в поле "IP адрес ESP32" в GUI.
 
 // ---------- WebSocket ----------
-/** TCP-порт, на котором ESP32 поднимает WebSocket-сервер для GUI. */
 #define WS_PORT 81
-/** Максимальный размер payload одного входящего WebSocket-кадра (байт). */
 #define WS_MAX_PAYLOAD 512
 
-/**
- * Мощность передатчика Wi-Fi (ограничена "на всякий случай"; можно
- * вернуть WIFI_POWER_19_5dBm для максимальной дальности).
- */
 #define WIFI_TX_POWER WIFI_POWER_15dBm
 
 // ---------- UART к полетному контроллеру (CRSF) ----------
-/** Объект Serial, используемый для связи с FC по протоколу CRSF. */
 #define CRSF_SERIAL Serial2
-/** Скорость UART для CRSF (стандарт для Betaflight/ELRS). */
 #define CRSF_BAUDRATE 420000
-/** Пин ESP32, принимающий данные от FC (RX2, подключается к TX FC). */
 #define CRSF_RX_PIN 16
-/** Пин ESP32, передающий данные на FC (TX2, подключается к RX FC). */
 #define CRSF_TX_PIN 17
 
-/** Целевая частота отправки кадров RC_CHANNELS на FC, Гц. */
 #define UPDATE_RATE_HZ 250
-/** Период между кадрами RC_CHANNELS, мс (соответствует UPDATE_RATE_HZ). */
 #define FRAME_PERIOD_MS 4
 
 // ---------- Каналы ----------
-/** Количество основных каналов (ROLL/PITCH/THROTTLE/YAW). */
 #define NUM_MAIN_CHANNELS 4
-/** Количество вспомогательных каналов (AUX1..AUX12). */
 #define NUM_AUX_CHANNELS 12
-/** Общее количество каналов CRSF (16). */
 #define TOTAL_CHANNELS (NUM_MAIN_CHANNELS + NUM_AUX_CHANNELS)  // 16
 
-/** Индексы основных каналов в массиве rc_channels_us. */
 enum { ROLL = 0, PITCH = 1, THROTTLE = 2, YAW = 3, AUX_START = 4 };
 
-/** Отображаемые имена всех 16 каналов, используются в логах и JSON. */
 static const char* CHANNEL_NAMES[TOTAL_CHANNELS] = {
-    "ROLL", "PITCH", "THROTTLE", "YAW",
-    "AUX1", "AUX2", "AUX3", "AUX4", "AUX5", "AUX6",
-    "AUX7", "AUX8", "AUX9", "AUX10", "AUX11", "AUX12"
+  "ROLL", "PITCH", "THROTTLE", "YAW",
+  "AUX1", "AUX2", "AUX3", "AUX4", "AUX5", "AUX6",
+  "AUX7", "AUX8", "AUX9", "AUX10", "AUX11", "AUX12"
 };
+
+// ---------- Связь с полётным контроллером: MSP + CLI (UART1 ESP32 на свободных GPIO) ----------
+// ESP32 GPIO26 (TX) -> FC RX3,   ESP32 GPIO25 (RX) <- FC TX3   (крест-накрест), общая земля.
+// UART1 выведен на GPIO25/26 через GPIO-матрицу; UART0 (USB) остаётся свободным для прошивки и отладки.
+#define FC_SERIAL Serial1
+#define FC_BAUD 115200
+#define FC_RX_PIN 25
+#define FC_TX_PIN 26

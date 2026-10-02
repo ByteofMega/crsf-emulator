@@ -1,21 +1,8 @@
 /**
  * @file ws_transport.h
- * @brief Низкоуровневый WebSocket-сервер (RFC 6455) на встроенных
- *        WiFiServer/WiFiClient, без сторонних библиотек AsyncTCP/
- *        ESPAsyncWebServer.
- *
- * Модуль отвечает только за "сырой" транспорт: принять TCP-клиента,
- * сделать handshake, прочитать текстовый кадр, отправить текстовый кадр.
- * Он ничего не знает про каналы/CRSF — этим занимается channel_state.h,
- * вызываемый из .ino как callback.
- *
- * ТРЕБУЕМАЯ БИБЛИОТЕКА: ArduinoJson (Benoit Blanchon) — используется
- * только для этого модуля не нужна напрямую, но подключается транзитивно
- * через channel_state.h/telemetry.h.
+ * @brief Низкоуровневый WebSocket-сервер (RFC 6455) на WiFiServer/WiFiClient.
  */
-
 #pragma once
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <mbedtls/sha1.h>
@@ -24,15 +11,6 @@
 
 namespace ws {
 
-/**
- * @brief Закодировать блок байт в строку Base64 (нужно только для ответа
- *        на WebSocket handshake, поле Sec-WebSocket-Accept).
- *
- * @param data Указатель на исходные байты для кодирования.
- * @param len  Количество байт в data.
- * @return String Результат кодирования в стандартном алфавите Base64,
- *                с паддингом '=' при необходимости.
- */
 inline String base64_encode(const uint8_t* data, size_t len) {
     static const char* chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -58,17 +36,9 @@ inline String base64_encode(const uint8_t* data, size_t len) {
     return out;
 }
 
-/**
- * @brief Вычислить значение заголовка Sec-WebSocket-Accept по ключу
- *        клиента согласно RFC 6455 (SHA1 от key+GUID, затем Base64).
- *
- * @param client_key Значение заголовка Sec-WebSocket-Key из запроса клиента.
- * @return String Готовое значение для заголовка Sec-WebSocket-Accept ответа.
- */
 inline String compute_ws_accept(const String& client_key) {
     const char* GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     String combined = client_key + GUID;
-
     uint8_t sha1_result[20];
     mbedtls_sha1_context ctx;
     mbedtls_sha1_init(&ctx);
@@ -76,27 +46,15 @@ inline String compute_ws_accept(const String& client_key) {
     mbedtls_sha1_update(&ctx, (const uint8_t*)combined.c_str(), combined.length());
     mbedtls_sha1_finish(&ctx, sha1_result);
     mbedtls_sha1_free(&ctx);
-
     return base64_encode(sha1_result, 20);
 }
 
-/**
- * @brief Отправить один текстовый WebSocket-кадр от сервера клиенту
- *        (без маскирования — по протоколу сервер клиенту маску не ставит).
- *
- * @param client Ссылка на подключённого TCP-клиента (GUI).
- * @param text   Текст сообщения для отправки (обычно JSON-строка).
- * @return void. Если клиент не подключён, вызов ничего не делает.
- */
 inline void send_text(WiFiClient& client, const String& text) {
     if (!client.connected()) return;
-
     size_t len = text.length();
     uint8_t header[4];
     size_t header_len = 0;
-
-    header[0] = 0x81;  // FIN=1, opcode=0x1 (текст)
-
+    header[0] = 0x81;
     if (len < 126) {
         header[1] = (uint8_t)len;
         header_len = 2;
@@ -106,27 +64,15 @@ inline void send_text(WiFiClient& client, const String& text) {
         header[3] = (uint8_t)(len & 0xFF);
         header_len = 4;
     } else {
-        return;  // не ожидаем таких больших сообщений в этом протоколе
+        return;
     }
-
     client.write(header, header_len);
     client.write((const uint8_t*)text.c_str(), len);
 }
 
-/**
- * @brief Выполнить HTTP -> WebSocket handshake с только что подключившимся
- *        TCP-клиентом: прочитать HTTP-заголовки, найти Sec-WebSocket-Key,
- *        отправить корректный ответ 101 Switching Protocols.
- *
- * @param client Ссылка на TCP-клиента, с которым нужно выполнить handshake.
- * @return bool true, если handshake успешно завершён и клиент готов к
- *              обмену WebSocket-кадрами; false при таймауте (2 секунды)
- *              или отсутствии заголовка Sec-WebSocket-Key.
- */
 inline bool try_handshake(WiFiClient& client) {
     String request;
     uint32_t start = millis();
-
     while (millis() - start < 2000) {
         while (client.available()) {
             char c = client.read();
@@ -135,51 +81,31 @@ inline bool try_handshake(WiFiClient& client) {
         }
         if (!client.connected()) return false;
     }
-    return false;  // таймаут
-
+    return false;
 headers_done:
     int key_idx = request.indexOf("Sec-WebSocket-Key:");
     if (key_idx < 0) return false;
-
     int key_start = key_idx + strlen("Sec-WebSocket-Key:");
     while (request[key_start] == ' ') key_start++;
     int key_end = request.indexOf("\r\n", key_start);
     String client_key = request.substring(key_start, key_end);
-
     String accept = compute_ws_accept(client_key);
-
     String response =
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
-
     client.print(response);
     return true;
 }
 
-/**
- * @brief Прочитать и разобрать один входящий WebSocket-кадр от клиента
- *        (кадры от клиента к серверу всегда маскированы согласно RFC 6455).
- *
- * @param client   Ссылка на подключённого и прошедшего handshake клиента.
- * @param out_text Ссылка на строку, куда будет записан демаскированный
- *                 текст сообщения при успешном разборе.
- * @return bool true, если удалось прочитать и демаскировать текстовый
- *              кадр (opcode 0x1); false при недостатке данных, слишком
- *              большом payload (> WS_MAX_PAYLOAD), кадре закрытия
- *              (opcode 0x8) или любом нетекстовом кадре.
- */
 inline bool read_frame(WiFiClient& client, String& out_text) {
     if (client.available() < 2) return false;
-
     uint8_t b0 = client.read();
     uint8_t b1 = client.read();
-
     uint8_t opcode = b0 & 0x0F;
     bool masked = (b1 & 0x80) != 0;
     uint64_t payload_len = b1 & 0x7F;
-
     if (payload_len == 126) {
         while (client.available() < 2) delay(1);
         uint8_t ext[2];
@@ -189,20 +115,17 @@ inline bool read_frame(WiFiClient& client, String& out_text) {
         while (client.available() < 8) delay(1);
         uint8_t ext[8];
         client.readBytes(ext, 8);
-        return false;  // такие огромные кадры этому протоколу не нужны
+        return false;
     }
-
     uint8_t mask[4] = {0, 0, 0, 0};
     if (masked) {
         while (client.available() < 4) delay(1);
         client.readBytes(mask, 4);
     }
-
     if (payload_len > WS_MAX_PAYLOAD) {
         while (payload_len-- > 0) client.read();
         return false;
     }
-
     uint8_t payload[WS_MAX_PAYLOAD];
     size_t received = 0;
     uint32_t start = millis();
@@ -211,14 +134,11 @@ inline bool read_frame(WiFiClient& client, String& out_text) {
             payload[received++] = client.read();
         }
     }
-
     if (masked) {
         for (size_t i = 0; i < received; i++) payload[i] ^= mask[i % 4];
     }
-
-    if (opcode == 0x8) return false;  // close
-    if (opcode != 0x1) return false;  // обрабатываем только текстовые кадры
-
+    if (opcode == 0x8) return false;
+    if (opcode != 0x1) return false;
     out_text = String((char*)payload, received);
     return true;
 }

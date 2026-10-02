@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Карта маршрута</title>
+<style>
+  html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
+</style>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=YOUR_API_KEY&amp;lang=ru_RU"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  // Клик по карте = новая точка маршрута; в режиме выбора старта клик = стартовая точка дрона.
+  // Положение дрона приходит из Python (расчётная оценка по формуле, НЕ GPS).
+  const DEFAULT_CENTER = [55.7887, 49.1221];
+  let map = null;
+  let waypoints = [];            // [[lat, lon], ...]
+  let waypointMarks = [];        // ymaps.Placemark
+  let routeLine = null;
+  let startPlacemark = null;
+  let startCoords = null;
+  let dronePlacemark = null, trackPolyline = null;
+  let bridge = null;
+  let hasCenteredOnDrone = false;
+  let startMode = false;
+
+  new QWebChannel(qt.webChannelTransport, function (channel) {
+    bridge = channel.objects.bridge;
+  });
+
+  ymaps.ready(initMap);
+
+  function initMap() {
+    map = new ymaps.Map('map', { center: DEFAULT_CENTER, zoom: 15 });
+    map.events.add('click', function (e) {
+      const coords = e.get('coords');
+      if (startMode) { setStart(coords); } else { addWaypoint(coords); }
+    });
+  }
+
+  function redrawRouteLine() {
+    if (routeLine) { map.geoObjects.remove(routeLine); routeLine = null; }
+    const pts = (startCoords ? [startCoords] : []).concat(waypoints);
+    if (pts.length < 2) return;
+    routeLine = new ymaps.Polyline(pts, {}, { strokeColor: '#1E88E5', strokeWidth: 3, strokeStyle: 'shortdash' });
+    map.geoObjects.add(routeLine);
+  }
+
+  function addWaypoint(coords) {
+    waypoints.push(coords);
+    const number = waypoints.length;
+    const mark = new ymaps.Placemark(coords, { iconContent: String(number) },
+      { preset: number === 1 ? 'islands#greenStretchyIcon' : 'islands#blueStretchyIcon' });
+    map.geoObjects.add(mark);
+    waypointMarks.push(mark);
+    redrawRouteLine();
+    notifyRouteUpdated();
+  }
+
+  function notifyRouteUpdated() {
+    if (bridge) { bridge.onRouteUpdated(JSON.stringify(waypoints)); }
+  }
+
+  // Python -> JS: следующий клик задаст старт
+  function enableStartMode() { startMode = true; }
+
+  function setStart(coords) {
+    startMode = false;
+    startCoords = coords;
+    if (!startPlacemark) {
+      startPlacemark = new ymaps.Placemark(coords, { iconCaption: 'Старт' }, { preset: 'islands#redDotIconWithCaption' });
+      map.geoObjects.add(startPlacemark);
+    } else {
+      startPlacemark.geometry.setCoordinates(coords);
+    }
+    redrawRouteLine();
+    if (bridge) { bridge.onStartSet(coords[0], coords[1]); }
+  }
+
+  function clearStart() {
+    startMode = false;
+    startCoords = null;
+    if (startPlacemark) { map.geoObjects.remove(startPlacemark); startPlacemark = null; }
+    redrawRouteLine();
+  }
+
+  // Python -> JS: убрать все точки маршрута
+  function resetRoute() {
+    for (const mark of waypointMarks) { map.geoObjects.remove(mark); }
+    waypoints = [];
+    waypointMarks = [];
+    redrawRouteLine();
+    notifyRouteUpdated();
+  }
+
+  // Python -> JS: очистить трек дрона
+  function clearDroneTrack() {
+    if (trackPolyline) { map.geoObjects.remove(trackPolyline); trackPolyline = null; }
+    hasCenteredOnDrone = false;
+  }
+
+  // Python -> JS: новая расчётная позиция дрона
+  function updateDronePosition(lat, lon) {
+    const coords = [lat, lon];
+    if (!dronePlacemark) {
+      dronePlacemark = new ymaps.Placemark(coords, { iconCaption: 'Дрон (оценка)' }, { preset: 'islands#blueAircraftIcon' });
+      map.geoObjects.add(dronePlacemark);
+    } else {
+      dronePlacemark.geometry.setCoordinates(coords);
+    }
+    if (!hasCenteredOnDrone) {
+      map.setCenter(coords, 17, { duration: 500 });
+      hasCenteredOnDrone = true;
+    }
+    if (!trackPolyline) {
+      trackPolyline = new ymaps.Polyline([coords], {}, { strokeColor: '#00E676', strokeWidth: 3 });
+      map.geoObjects.add(trackPolyline);
+    } else {
+      const current = trackPolyline.geometry.getCoordinates();
+      current.push(coords);
+      trackPolyline.geometry.setCoordinates(current);
+    }
+  }
+</script>
+</body>
+</html>
