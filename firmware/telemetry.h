@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include "config.h"
 #include "crsf_protocol.h"
+#include "msp_crsf.h"
 
 namespace telemetry {
 
@@ -60,7 +61,9 @@ inline int32_t read_i32(const uint8_t* p) {
 }
 
 inline void handle_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
+    msp_crsf::note_frame(type);  // счётчик принятых кадров CRSF от FC
     switch (type) {
+        case CRSF_FRAMETYPE_MSP_RESP: msp_crsf::on_response(payload, len); break;
         case CRSF_FRAMETYPE_BATTERY:
             if (len >= 8) {
                 state.voltage_v = read_i16(payload) / VOLTAGE_DIV;

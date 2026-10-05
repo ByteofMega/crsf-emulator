@@ -6,7 +6,7 @@
 <style>
   html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
 </style>
-<script src="https://api-maps.yandex.ru/2.1/?apikey=YOUR_API_KEY&amp;lang=ru_RU"></script>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=d1a840ca-4c99-4bc8-b630-1bf842f3dbcb&amp;lang=ru_RU"></script>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 </head>
 <body>
@@ -79,10 +79,14 @@
     if (bridge) { bridge.onStartSet(coords[0], coords[1]); }
   }
 
+  // Python -> JS: стереть стартовую точку, метку дрона и его трек
   function clearStart() {
     startMode = false;
     startCoords = null;
     if (startPlacemark) { map.geoObjects.remove(startPlacemark); startPlacemark = null; }
+    if (dronePlacemark) { map.geoObjects.remove(dronePlacemark); dronePlacemark = null; }
+    if (trackPolyline) { map.geoObjects.remove(trackPolyline); trackPolyline = null; }
+    hasCenteredOnDrone = false;
     redrawRouteLine();
   }
 
@@ -95,7 +99,7 @@
     notifyRouteUpdated();
   }
 
-  // Python -> JS: очистить трек дрона
+  // Python -> JS: очистить только трек дрона (метка остаётся)
   function clearDroneTrack() {
     if (trackPolyline) { map.geoObjects.remove(trackPolyline); trackPolyline = null; }
     hasCenteredOnDrone = false;

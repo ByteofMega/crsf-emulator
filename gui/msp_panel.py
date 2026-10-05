@@ -11,14 +11,41 @@ from PyQt6.QtWidgets import (
 from msp_codes import READ_CODES, decode, format_decoded
 
 
+def diagnose_crsf(d: dict) -> str:
+    req, resp, rx = d.get("crsf_req", 0), d.get("crsf_resp", 0), d.get("crsf_rx", 0)
+    bad, consec = d.get("crsf_bad", 0), d.get("consec_to", 0)
+    prefix = "CLI открыт, MSP идёт параллельно по CRSF. " if d.get("mode") == "cli" else ""
+    if req == 0:
+        return prefix + "ESP32 ещё не отправляла MSP-запросы по CRSF"
+    if resp == 0:
+        if rx == 0:
+            return (prefix + "FC не присылает ни одного кадра CRSF: включите на FC телеметрию CRSF "
+                    "(Configuration → Telemetry) и проверьте провода GPIO16/GPIO17 ↔ RX1/TX1. "
+                    "Если ответов не будет, ESP32 сама перейдёт на MSP по UART3")
+        return (prefix + "FC шлёт кадры CRSF, но не отвечает на MSP-запросы. "
+                "Если ответов не будет, ESP32 сама перейдёт на MSP по UART3")
+    if consec >= 15:
+        return prefix + "ответы по CRSF перестали приходить (FC перезагружается или зависла?)"
+    if bad > 0 and bad > resp // 4:
+        return prefix + f"часть ответов не разобрана ({bad}): вероятно, ответы длиннее одного кадра CRSF"
+    return prefix + "MSP по CRSF работает"
+
+
 def diagnose(d: dict) -> str:
     """Вывод по счётчикам ESP32: где обрывается связь."""
+    if d.get("transport") == "crsf":
+        return diagnose_crsf(d)
     if d.get("mode") == "cli":
-        return "режим CLI (опрос MSP остановлен)"
+        return "режим CLI на UART3 (в запасном режиме MSP по UART3 опрос на время CLI остановлен)"
     tx, rx, ok, crc, to = (d.get(k, 0) for k in ("tx", "rx_bytes", "frames", "crc_err", "timeouts"))
     consec, since_ok, rec = d.get("consec_to", 0), d.get("since_ok", 0), d.get("recoveries", 0)
+    selfe = d.get("self_echo", 0)
     if tx == 0:
         return "ESP32 ещё не отправляла запросы"
+    if selfe > 20 and ok < selfe:
+        return (f"ESP32 слышит СОБСТВЕННЫЕ запросы на RX ({selfe} раз): линия TX замыкается/наводится на RX "
+                "(провода GPIO25 и GPIO26 рядом/касаются) либо FC не держит свой TX. Раздвиньте провода, "
+                "проверьте замыкание; убедитесь, что FC включена и вышла из перезагрузки")
     if rx == 0:
         return ("ОТ FC НЕТ НИ БАЙТА: проверьте провода TX/RX крест-накрест и общую землю, "
                 "что на UART3 включён MSP (Ports) и сохранено, скорость 115200")
@@ -36,7 +63,7 @@ def diagnose(d: dict) -> str:
         return "кадры приходят с ошибками контрольной суммы: помехи/скорость/неисправный провод"
     if consec >= 3:
         return "связь с FC нестабильна: идут подряд запросы без ответа"
-    return "связь с FC работает"
+    return "связь с FC (MSP по UART3, запасной режим) работает"
 
 
 class MspPanel(QWidget):
@@ -119,12 +146,14 @@ class MspPanel(QWidget):
         return row
 
     def _on_diag(self, d: dict):
+        transport = "CRSF (линия UART1 FC)" if d.get("transport") == "crsf" else "UART3 (запасной режим)"
         self.diag_label.setText(
-            "Обмен ESP32 <-> FC: запросов {tx}, принято байт {rx_bytes}, кадров OK {frames}, "
-            "ошибок CRC {crc_err}, ответов-ошибок {msp_err}, таймаутов {timeouts} (подряд {consec_to}), "
-            "авто-exit {recoveries}".format(
-                **{k: d.get(k, 0) for k in ("tx", "rx_bytes", "frames", "crc_err", "msp_err",
-                                            "timeouts", "consec_to", "recoveries")}))
+            f"MSP идёт по: {transport}. Запросов {d.get('tx', 0)}, кадров OK {d.get('frames', 0)}, "
+            f"таймаутов {d.get('timeouts', 0)} (подряд {d.get('consec_to', 0)}). "
+            f"CRSF: запросов {d.get('crsf_req', 0)}, ответов {d.get('crsf_resp', 0)}, не разобрано {d.get('crsf_bad', 0)}, "
+            f"всего кадров от FC {d.get('crsf_rx', 0)}. "
+            f"UART3: байт {d.get('rx_bytes', 0)}, CRC {d.get('crc_err', 0)}, собственных запросов на RX {d.get('self_echo', 0)}, "
+            f"авто-exit {d.get('recoveries', 0)}")
         self.diag_verdict.setText("Вывод: " + diagnose(d))
 
     def _request_all(self):
@@ -138,7 +167,7 @@ class MspPanel(QWidget):
         self._queue.append(code)
 
     def _pump_queue(self):
-        if self._queue and self._ws.is_connected() and not self._ws.cli_mode:
+        if self._queue and self._ws.is_connected():
             self._ws.request_msp(self._queue.pop(0))
 
     def _on_msp(self, cmd: int, data: bytes, err: bool):

@@ -1,7 +1,7 @@
 """map_view.py - карта Яндекса в GUI (QWebEngineView + QWebChannel).
 
 map.html раздаётся через локальный HTTP-сервер (нужно для Referer с ключом API Яндекс.Карт).
-Новое: режим выбора СТАРТОВОЙ точки (оператор кликает по карте), сигнал start_set.
+Режим выбора СТАРТОВОЙ точки (оператор кликает по карте): сигнал start_set.
 """
 
 import json
@@ -82,4 +82,5 @@ class MapView(QWebEngineView):
         self.page().runJavaScript("if (typeof clearDroneTrack === 'function') { clearDroneTrack(); }")
 
     def clear_start(self):
+        """Стереть стартовую точку, метку дрона и трек."""
         self.page().runJavaScript("if (typeof clearStart === 'function') { clearStart(); }")

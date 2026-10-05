@@ -1,29 +1,27 @@
 /**
  * @file msp_bridge.h
- * @brief Мост ESP32 <-> полётный контроллер (FC_SERIAL = UART1 на GPIO25/26 <-> UART3 FC):
- *        режим MSP (опрос и проброс кадров в GUI) и режим CLI (текстовый проброс).
+ * @brief Мост ESP32 <-> полётный контроллер: MSP (опрос параметров дрона) и CLI (настройки).
+ *
+ * ДВЕ НЕЗАВИСИМЫЕ ЛИНИИ:
+ *   - Serial2 (GPIO16/17) <-> UART1 FC: CRSF (RC-каналы + телеметрия) и, ПО УМОЛЧАНИЮ, MSP внутри CRSF-кадров
+ *     (msp_crsf.h). Эта линия работает всегда, в том числе пока открыт CLI.
+ *   - FC_SERIAL = Serial1 (GPIO25/26) <-> UART3 FC: CLI (и запасной канал MSP).
+ * Поэтому MSP и CLI работают одновременно: во время CLI-сессии MSP-данные продолжают идти.
+ * Если за MSP_CRSF_FALLBACK_REQS запросов по CRSF не пришло ни одного ответа (на FC не включена телеметрия CRSF
+ * или версия прошивки не поддерживает MSP по CRSF), ESP32 сама переходит на MSP по UART3 (как раньше; тогда
+ * на время CLI опрос MSP останавливается). Принудительно только UART3: #define MSP_USE_CRSF 0.
  *
  * Сообщения от GUI (WebSocket, JSON):
  *   {"msp_req": 108}                      - один раз запросить MSP-команду
- *   {"cli": "enter"}                      - войти в CLI ('#'), опрос MSP останавливается
- *   {"cli": "line", "text": "get level_limit"} - отправить строку в CLI
- *   {"cli": "leave"}                      - вернуться в режим MSP (команду выхода шлёт GUI строкой)
- *
+ *   {"cli": "enter"} / {"cli": "line", "text": "..."} / {"cli": "leave"}
  * Сообщения в GUI:
  *   {"msp": {"cmd": 108, "err": 0, "data": "hex..."}}
  *   {"cli_out": "текст из CLI"}
- *   {"msp_diag": {...}}  - счётчики обмена с FC раз в секунду (диагностика связи)
+ *   {"msp_diag": {...}}  - счётчики обмена (диагностика)
  *
- * АВТОВЫХОД ИЗ CLI (MSP_AUTO_RECOVER):
- * Любой байт '#' на порту MSP (в том числе помеха) переводит Betaflight в CLI, и она перестаёт отвечать
- * на MSP, а лишь печатает приглашение "# " и возвращает принятое эхом. ESP32 в режиме MSP отслеживает
- * в потоке от FC приглашение "\n# " и сразу шлёт "\r\nexit\r\n" (пустая строка сначала сбрасывает мусор
- * в строке CLI), повторяя каждые 1.5 с, пока не пойдут корректные MSP-кадры (после exit FC
- * перезагружается ~3-4 с). Запасной путь: серия таймаутов + байты от FC без кадров.
- * Если FC не в CLI, посланные байты MSP-парсер Betaflight игнорирует.
- *
- * Разрешены только команды чтения (см. command_allowed): SET-команды MSP
- * (перезагрузка, калибровки, сброс настроек, запись EEPROM) запрещены.
+ * Вход в CLI: ESP32 шлёт ОДИН '#' (без \r\n) после паузы 400 мс без своей передачи по UART3.
+ * Автовыход из CLI (только в режиме MSP по UART3): см. MSP_AUTO_RECOVER.
+ * Разрешены только команды чтения (command_allowed): SET-команды MSP запрещены.
  */
 #pragma once
 #include <Arduino.h>
@@ -31,24 +29,32 @@
 #include <WiFi.h>
 #include "config.h"
 #include "ws_transport.h"
+#include "msp_crsf.h"
+
+#ifndef MSP_USE_CRSF
+#define MSP_USE_CRSF 1
+#endif
 
 #define MSP_POLL_PERIOD_MS   30
 #define MSP_RESP_TIMEOUT_MS  120
 #define CLI_IDLE_FLUSH_MS    40
 #define CLI_CHUNK_MAX        200
 #define MSP_DIAG_PERIOD_MS   1000
+#define CLI_HASH_DELAY_MS    400
+#define MSP_CRSF_FALLBACK_REQS 250   // запросов по CRSF без единого ответа (~35 с) -> переход на UART3
 
-#define MSP_AUTO_RECOVER         1      // 0 - выключить автоматический "exit"
-#define MSP_CLI_EXIT_PERIOD_MS   1500   // интервал между попытками exit при замеченном приглашении CLI
-#define MSP_CLI_EXIT_MAX_TRIES   20     // максимум попыток за один "залип" (сброс при корректном кадре)
-#define MSP_RECOVER_TIMEOUTS     40     // запасной путь: таймаутов подряд ...
-#define MSP_RECOVER_MIN_BYTES    200    // ... и байт от FC без кадров
-#define MSP_RECOVER_PERIOD_MS    20000  // ... не чаще раза за это время
+#define MSP_AUTO_RECOVER         1      // 0 - выключить автоматический "exit" (режим MSP по UART3)
+#define MSP_CLI_EXIT_PERIOD_MS   5000
+#define MSP_CLI_EXIT_MAX_TRIES   4
+#define MSP_RECOVER_TIMEOUTS     40
+#define MSP_RECOVER_MIN_BYTES    200
+#define MSP_RECOVER_PERIOD_MS    20000
 
 namespace msp {
 
 enum Mode : uint8_t { MODE_MSP = 0, MODE_CLI = 1 };
 static Mode mode = MODE_MSP;
+static bool use_crsf = (MSP_USE_CRSF != 0);
 
 // Постоянный опрос: ATTITUDE(108) чаще остальных, RAW_IMU(102), ANALOG(110), STATUS(101)
 static const uint8_t POLL_CMDS[] = { 108, 102, 108, 110, 101 };
@@ -67,17 +73,20 @@ static uint32_t last_exit_ms = 0;
 static uint8_t exit_tries = 0;
 static bool cli_prompt_seen = false;
 static uint8_t tail3[3] = { 0, 0, 0 };
+static bool hash_pending = false;
+static uint32_t hash_due_ms = 0;
 
-// Диагностика: что реально происходит на проводе ESP32 <-> FC
-static uint32_t d_tx = 0;        // отправлено запросов
-static uint32_t d_rx_bytes = 0;  // принято байт от FC (любых)
+// Диагностика
+static uint32_t d_tx = 0;        // отправлено MSP-запросов (любым путём)
+static uint32_t d_rx_bytes = 0;  // принято байт по UART3
 static uint32_t d_frames = 0;    // принято корректных MSP-кадров
-static uint32_t d_crc = 0;       // кадров с ошибкой контрольной суммы
-static uint32_t d_err = 0;       // ответов '!' (FC не поддерживает команду)
+static uint32_t d_crc = 0;       // кадров с ошибкой контрольной суммы (UART3)
+static uint32_t d_err = 0;       // ответов-ошибок
 static uint32_t d_timeout = 0;   // запросов без ответа
 static uint32_t d_recover = 0;   // автоматических "exit"
-static uint32_t consec_timeouts = 0;  // таймаутов подряд (сбрасывается корректным кадром)
-static uint32_t rx_since_ok = 0;      // байт от FC после последнего корректного кадра
+static uint32_t d_self = 0;      // собственных запросов '$M<' на RX UART3
+static uint32_t consec_timeouts = 0;
+static uint32_t rx_since_ok = 0;
 
 struct Parser {
   uint8_t state = 0;
@@ -110,6 +119,15 @@ inline bool queue_pop(uint8_t& c) {
   return true;
 }
 
+inline uint8_t next_poll_cmd() {
+  uint8_t cmd;
+  if (!queue_pop(cmd)) {
+    cmd = POLL_CMDS[poll_idx];
+    poll_idx = (poll_idx + 1) % POLL_COUNT;
+  }
+  return cmd;
+}
+
 inline void drain_input() {
   while (FC_SERIAL.available()) FC_SERIAL.read();
   p.state = 0;
@@ -117,14 +135,14 @@ inline void drain_input() {
   cli_prompt_seen = false;
 }
 
-inline void send_request(uint8_t cmd) {
+inline void send_request_uart3(uint8_t cmd) {
   // MSP v1: '$' 'M' '<' len cmd [payload] checksum; без payload checksum = len ^ cmd = cmd
   uint8_t f[6] = { '$', 'M', '<', 0, cmd, cmd };
   FC_SERIAL.write(f, sizeof(f));
   d_tx++;
 }
 
-// Возвращает true, когда собран корректный кадр (p.cmd, p.len, p.buf, p.err)
+// Разбор MSP-кадра с UART3. true - собран корректный кадр (p.cmd, p.len, p.buf, p.err)
 inline bool feed(uint8_t b) {
   switch (p.state) {
     case 0: if (b == '$') p.state = 1; break;
@@ -132,7 +150,10 @@ inline bool feed(uint8_t b) {
     case 2:
       if (b == '>') { p.err = false; p.state = 3; }
       else if (b == '!') { p.err = true; p.state = 3; }
-      else p.state = 0;
+      else {
+        if (b == '<') d_self++;   // FC так не отвечает: наш собственный запрос вернулся на RX
+        p.state = 0;
+      }
       break;
     case 3: p.len = b; p.crc = b; p.idx = 0; p.state = 4; break;
     case 4:
@@ -179,6 +200,8 @@ inline void emit_frame(WiFiClient& c) {
 inline void emit_diag(WiFiClient& c) {
   String msg = "{\"msp_diag\":{\"mode\":\"";
   msg += (mode == MODE_CLI) ? "cli" : "msp";
+  msg += "\",\"transport\":\"";
+  msg += use_crsf ? "crsf" : "uart3";
   msg += "\",\"tx\":" + String(d_tx);
   msg += ",\"rx_bytes\":" + String(d_rx_bytes);
   msg += ",\"frames\":" + String(d_frames);
@@ -188,6 +211,11 @@ inline void emit_diag(WiFiClient& c) {
   msg += ",\"consec_to\":" + String(consec_timeouts);
   msg += ",\"since_ok\":" + String(rx_since_ok);
   msg += ",\"recoveries\":" + String(d_recover);
+  msg += ",\"self_echo\":" + String(d_self);
+  msg += ",\"crsf_req\":" + String(msp_crsf::d_req);
+  msg += ",\"crsf_resp\":" + String(msp_crsf::d_resp);
+  msg += ",\"crsf_bad\":" + String(msp_crsf::d_bad);
+  msg += ",\"crsf_rx\":" + String(msp_crsf::d_rx);
   msg += "}}";
   ws::send_text(c, msg);
 }
@@ -205,17 +233,20 @@ inline void flush_cli(WiFiClient& c) {
 
 inline void enter_cli() {
   mode = MODE_CLI;
-  waiting = false;
+  waiting = use_crsf ? waiting : false;
   cli_len = 0;
   drain_input();
-  FC_SERIAL.print("#\r\n");
+  // '#' шлём один, без \r\n и не сразу: перед входом в CLI на порту нужна тишина
+  hash_pending = true;
+  hash_due_ms = millis() + CLI_HASH_DELAY_MS;
   cli_last_rx_ms = millis();
 }
 
 inline void leave_cli() {
   mode = MODE_MSP;
-  waiting = false;
+  if (!use_crsf) waiting = false;
   cli_len = 0;
+  hash_pending = false;
   consec_timeouts = 0;
   rx_since_ok = 0;
   exit_tries = 0;
@@ -243,7 +274,8 @@ inline bool apply_client_message(const String& text) {
 
   if (doc.containsKey("msp_req")) {
     int c = doc["msp_req"] | 0;
-    if (command_allowed(c) && mode == MODE_MSP) queue_push((uint8_t)c);
+    // по CRSF MSP-запросы идут и во время CLI; по UART3 - только вне CLI
+    if (command_allowed(c) && (use_crsf || mode == MODE_MSP)) queue_push((uint8_t)c);
     return true;
   }
 
@@ -261,6 +293,10 @@ inline bool apply_client_message(const String& text) {
 }
 
 inline void pump_cli(WiFiClient& c, uint32_t now) {
+  if (hash_pending && now >= hash_due_ms) {
+    FC_SERIAL.write('#');
+    hash_pending = false;
+  }
   while (FC_SERIAL.available()) {
     int b = FC_SERIAL.read();
     if (b < 0) break;
@@ -275,7 +311,6 @@ inline void pump_cli(WiFiClient& c, uint32_t now) {
 }
 
 inline void send_exit(uint32_t now) {
-  // пустая строка выполняет и выбрасывает мусор в строке CLI, затем exit
   FC_SERIAL.print("\r\nexit\r\n");
   d_recover++;
   last_exit_ms = now;
@@ -285,31 +320,46 @@ inline void send_exit(uint32_t now) {
   cli_prompt_seen = false;
 }
 
-/**
- * @brief Вызывать из loop() на каждой итерации.
- * @param c WebSocket-клиент GUI
- * @param ws_ready true, если GUI подключён и handshake выполнен
- */
-inline void poll(WiFiClient& c, bool ws_ready) {
-  uint32_t now = millis();
-
-  if (!ws_ready) {
-    if (mode == MODE_CLI) on_client_lost();
-    drain_input();
+// ---------- MSP по CRSF (линия Serial2) ----------
+inline void crsf_poll(WiFiClient& c, uint32_t now) {
+  msp_crsf::Resp r;
+  while (msp_crsf::take(r)) {
+    p.cmd = r.cmd;
+    p.len = r.len;
+    p.err = r.err;
+    memcpy(p.buf, r.data, r.len);
+    d_frames++;
+    if (p.err) d_err++;
+    consec_timeouts = 0;
+    emit_frame(c);
     waiting = false;
+  }
+
+  if (waiting && now - req_ms > MSP_RESP_TIMEOUT_MS) {
+    waiting = false;
+    d_timeout++;
+    consec_timeouts++;
+  }
+
+  // ни одного ответа по CRSF -> телеметрия на FC не включена / нет поддержки: переходим на MSP по UART3
+  if (msp_crsf::d_req >= MSP_CRSF_FALLBACK_REQS && msp_crsf::d_resp == 0) {
+    use_crsf = false;
+    waiting = false;
+    drain_input();
     return;
   }
 
-  if (now - last_diag_ms >= MSP_DIAG_PERIOD_MS) {
-    last_diag_ms = now;
-    emit_diag(c);
+  if (!waiting && now - last_req_ms >= MSP_POLL_PERIOD_MS) {
+    msp_crsf::send_request(next_poll_cmd());
+    d_tx++;
+    waiting = true;
+    req_ms = now;
+    last_req_ms = now;
   }
+}
 
-  if (mode == MODE_CLI) {
-    pump_cli(c, now);
-    return;
-  }
-
+// ---------- MSP по UART3 (запасной вариант) ----------
+inline void uart3_poll(WiFiClient& c, uint32_t now) {
   while (FC_SERIAL.available()) {
     uint8_t b = (uint8_t)FC_SERIAL.read();
     d_rx_bytes++;
@@ -335,13 +385,11 @@ inline void poll(WiFiClient& c, bool ws_ready) {
   }
 
 #if MSP_AUTO_RECOVER
-  // 1) FC напечатала приглашение CLI "# " -> она в режиме CLI: шлём exit (повторяем, пока не пойдут кадры)
   if (cli_prompt_seen && exit_tries < MSP_CLI_EXIT_MAX_TRIES && now - last_exit_ms >= MSP_CLI_EXIT_PERIOD_MS) {
     exit_tries++;
     send_exit(now);
     return;
   }
-  // 2) запасной путь: долго нет кадров, а байты от FC идут (приглашение могло исказиться помехой)
   if (consec_timeouts >= MSP_RECOVER_TIMEOUTS && rx_since_ok >= MSP_RECOVER_MIN_BYTES &&
       now - last_recover_ms >= MSP_RECOVER_PERIOD_MS) {
     last_recover_ms = now;
@@ -351,16 +399,46 @@ inline void poll(WiFiClient& c, bool ws_ready) {
 #endif
 
   if (!waiting && now - last_req_ms >= MSP_POLL_PERIOD_MS) {
-    uint8_t cmd;
-    if (!queue_pop(cmd)) {
-      cmd = POLL_CMDS[poll_idx];
-      poll_idx = (poll_idx + 1) % POLL_COUNT;
-    }
-    send_request(cmd);
+    send_request_uart3(next_poll_cmd());
     waiting = true;
     req_ms = now;
     last_req_ms = now;
   }
+}
+
+/**
+ * @brief Вызывать из loop() на каждой итерации.
+ * @param c WebSocket-клиент GUI
+ * @param ws_ready true, если GUI подключён и handshake выполнен
+ */
+inline void poll(WiFiClient& c, bool ws_ready) {
+  uint32_t now = millis();
+
+  if (!ws_ready) {
+    if (mode == MODE_CLI) on_client_lost();
+    drain_input();
+    waiting = false;
+    msp_crsf::resp.ready = false;
+    return;
+  }
+
+  if (now - last_diag_ms >= MSP_DIAG_PERIOD_MS) {
+    last_diag_ms = now;
+    emit_diag(c);
+  }
+
+  if (use_crsf) {
+    if (mode == MODE_CLI) pump_cli(c, now);
+    else drain_input();           // UART3 вне CLI не используется
+    crsf_poll(c, now);
+    return;
+  }
+
+  if (mode == MODE_CLI) {
+    pump_cli(c, now);
+    return;
+  }
+  uart3_poll(c, now);
 }
 
 } // namespace msp

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+import cli_ws
 from channel_widgets import ChannelPanel
 from config import CHANNEL_NAMES, DEFAULT_IP, DEFAULT_PORT, DEFAULT_VALUES, STYLESHEET
 from map_view import MapView
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self._last_battery = None
         self._pending_route: list = []
         self._navigator = None
+        self._cli_busy = False
 
         self._nav_timer = QTimer(self)
         self._nav_timer.setInterval(NAV_TICK_MS)
@@ -197,6 +199,7 @@ class MainWindow(QMainWindow):
 
         # --- Настройки FC (CLI через ESP32) и MSP ---
         self.settings_panel = FcSettingsPanel(self.ws_client, nav_active=lambda: self._navigator is not None)
+        self.settings_panel.busy_changed.connect(self._on_cli_busy)
         tabs.addTab(self.settings_panel, "Настройки FC")
         self.msp_panel = MspPanel(self.ws_client)
         tabs.addTab(self.msp_panel, "MSP")
@@ -231,6 +234,11 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, message: str):
         self.status_label.setText(f"Ошибка: {message}")
+
+    # ---------- обмен с FC по CLI: блокируется только запуск маршрута ----------
+    def _on_cli_busy(self, busy: bool):
+        self._cli_busy = busy
+        self.start_nav_btn.setEnabled((not busy) and bool(self._pending_route) and self._navigator is None)
 
     # ---------- каналы ----------
     def _on_channel_changed(self, idx: int, value: int):
@@ -286,8 +294,7 @@ class MainWindow(QMainWindow):
     def _reset_position(self):
         self._stop_navigation()
         self._est = None
-        self.map_view.clear_start()
-        self.map_view.clear_track()
+        self.map_view.clear_start()  # стирает старт, метку дрона и трек
         self.pos_label.setText("Старт не задан: нажмите кнопку и кликните по карте")
         self.speed_label.setText("-")
         self._update_route_estimate()
@@ -312,7 +319,7 @@ class MainWindow(QMainWindow):
     # ---------- маршрут ----------
     def _on_route_updated(self, waypoints: list):
         self._pending_route = waypoints
-        self.start_nav_btn.setEnabled(len(waypoints) > 0)
+        self.start_nav_btn.setEnabled(len(waypoints) > 0 and not self._cli_busy)
         if waypoints:
             self.route_status_label.setText(f"Точек в маршруте: {len(waypoints)} (финиш - точка №{len(waypoints)})")
         else:
@@ -399,6 +406,9 @@ class MainWindow(QMainWindow):
 
     # ---------- навигация ----------
     def _start_navigation(self):
+        if self._cli_busy:
+            QMessageBox.warning(self, "FC занята", "Идёт обмен с FC по CLI (она перезагружается). Дождитесь окончания.")
+            return
         if not self.ws_client.is_connected():
             QMessageBox.warning(self, "Нет соединения", "Сначала подключитесь к ESP32.")
             return
@@ -432,7 +442,7 @@ class MainWindow(QMainWindow):
     def _stop_navigation(self):
         self._nav_timer.stop()
         self._navigator = None
-        self.start_nav_btn.setEnabled(len(self._pending_route) > 0)
+        self.start_nav_btn.setEnabled(len(self._pending_route) > 0 and not self._cli_busy)
         self.stop_nav_btn.setEnabled(False)
         self.route_status_label.setText("Навигация остановлена")
         if self.ws_client.is_connected():
@@ -454,6 +464,7 @@ class MainWindow(QMainWindow):
             self._stop_navigation()
 
     def closeEvent(self, event):
+        cli_ws.request_abort()      # прервать возможный обмен с FC, чтобы процесс не завис при выходе
         ip = self.ip_input.text().strip()
         port_text = self.port_input.text().strip()
         if ip and port_text.isdigit():

@@ -210,7 +210,7 @@ void handle_network_reconnect_if_requested() {
 void setup() {
   Serial.begin(115200);
 
-  // UART1 на GPIO25/26 - связь с UART3 полётного контроллера (MSP + CLI).
+  // UART1 на GPIO25/26 - CLI полётного контроллера (UART3 FC). MSP идёт по линии CRSF (Serial2).
   // Буфер приёма увеличен: dump CLI приходит быстрее, чем loop() успевает его отправлять.
   FC_SERIAL.setRxBufferSize(4096);
   FC_SERIAL.begin(FC_BAUD, SERIAL_8N1, FC_RX_PIN, FC_TX_PIN);

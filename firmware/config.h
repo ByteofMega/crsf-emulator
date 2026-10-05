@@ -21,11 +21,11 @@
 static const char* WIFI_SSID = "KFU.NET";
 
 // Внешний EAP-идентификатор (identity) — можно оставить таким же, как логин.
-static const char* WIFI_EAP_IDENTITY = "type_your_eap_identity";
+static const char* WIFI_EAP_IDENTITY = "ArMSalakhov";
 
-// Логин и пароль для входа в корпоративную сеть.
-static const char* WIFI_EAP_USERNAME = "type_your_eap_username";
-static const char* WIFI_EAP_PASSWORD = "type_your_password";
+// Логин и пароль для входа в корпоративную сеть КФУ.
+static const char* WIFI_EAP_USERNAME = "ArMSalakhov";
+static const char* WIFI_EAP_PASSWORD = "TIMQrh1h2o";
 
 // ---------- Собственная точка доступа ESP32 для ноутбука с GUI ----------
 // Ноутбук подключается СЮДА, а не к KFU.NET — это обходит изоляцию
@@ -69,9 +69,9 @@ static const char* CHANNEL_NAMES[TOTAL_CHANNELS] = {
   "AUX7", "AUX8", "AUX9", "AUX10", "AUX11", "AUX12"
 };
 
-// ---------- Связь с полётным контроллером: MSP + CLI (UART1 ESP32 на свободных GPIO) ----------
+// ---------- Связь с полётным контроллером: CLI (и запасной MSP) - UART1 ESP32 на свободных GPIO ----------
 // ESP32 GPIO26 (TX) -> FC RX3,   ESP32 GPIO25 (RX) <- FC TX3   (крест-накрест), общая земля.
-// UART1 выведен на GPIO25/26 через GPIO-матрицу; UART0 (USB) остаётся свободным для прошивки и отладки.
+// UART1 выведен на GPIO25/26 через GPIO-матрицу. MSP идёт по линии CRSF (Serial2 <-> UART1 FC), см. msp_bridge.h.
 #define FC_SERIAL Serial1
 #define FC_BAUD 115200
 #define FC_RX_PIN 25

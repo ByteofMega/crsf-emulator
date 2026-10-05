@@ -2,7 +2,7 @@
 
 Каналы RC, настройки Wi-Fi, MSP-кадры от FC, диагностика обмена и проброс CLI идут по одному WebSocket.
 last_msp_time - время (time.monotonic) последнего корректного MSP-кадра от FC: по нему CLI-клиент проверяет,
-что FC жива и в режиме MSP, прежде чем входить в CLI.
+что FC жива, прежде чем входить в CLI, и ждёт её возврата после exit/save.
 """
 
 import json
@@ -59,8 +59,9 @@ class CrsfWsClient(QObject):
                                     "password": password, "enterprise": enterprise}})
 
     def request_msp(self, cmd: int) -> bool:
-        """Запросить одну MSP-команду (только из READ_CODES - команды записи запрещены)."""
-        if cmd not in READ_CODES or self.cli_mode:
+        """Запросить одну MSP-команду (только из READ_CODES - команды записи запрещены).
+        MSP по CRSF работает и во время CLI; в запасном режиме (UART3) ESP32 сама игнорирует запрос в CLI."""
+        if cmd not in READ_CODES:
             return False
         return self._send({"msp_req": int(cmd)})
 
