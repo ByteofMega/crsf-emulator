@@ -1,3 +1,53 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА msp_bridge.h
+ * Мост ESP32 и FC: MSP (параметры дрона) по линии CRSF и CLI по UART1 (GPIO25/26); запасной MSP по UART3; диагностика.
+ *
+ * ФУНКЦИИ:
+ * msp::command_allowed(int c)
+ *     Разрешает только коды чтения MSP (1-199, кроме 68 - перезагрузка).
+ * msp::queue_push(uint8_t c) / msp::queue_pop(uint8_t& c)
+ *     Кольцевая очередь запросов MSP от GUI (8 элементов).
+ * msp::next_poll_cmd()
+ *     Следующий запрос: из очереди GUI, иначе по циклу постоянного опроса (ATTITUDE, RAW_IMU,
+ *     ANALOG, STATUS).
+ * msp::drain_input()
+ *     Сбрасывает входной буфер UART1 и состояние разбора.
+ * msp::send_request_uart3(uint8_t cmd)
+ *     Запасной режим: отправляет MSP-запрос по UART3 в формате $M<.
+ * msp::feed(uint8_t b)
+ *     Побайтовый разбор MSP-ответа UART3 ($M>, длина, код, данные, контрольная сумма); считает
+ *     ошибки CRC и собственные запросы на RX.
+ * msp::to_hex(const uint8_t* d, size_t n)
+ *     Байты -> строка hex.
+ * msp::emit_frame(WiFiClient& c)
+ *     Отправляет в GUI принятый MSP-кадр в виде JSON.
+ * msp::emit_diag(WiFiClient& c)
+ *     Раз в секунду отправляет в GUI счётчики обмена (транспорт, запросы, ответы, ошибки).
+ * msp::flush_cli(WiFiClient& c)
+ *     Отправляет в GUI накопленный текст из CLI.
+ * msp::enter_cli()
+ *     Включает режим CLI: сбрасывает буфер и планирует отправку одного символа # после паузы.
+ * msp::leave_cli()
+ *     Возвращает режим MSP и сбрасывает счётчики восстановления.
+ * msp::on_client_lost()
+ *     При обрыве связи с GUI во время CLI отправляет exit и выходит из режима CLI.
+ * msp::apply_client_message(const String& text)
+ *     Обрабатывает сообщения GUI «msp_req» и «cli» (enter, line, leave); true, если сообщение
+ *     предназначалось модулю.
+ * msp::pump_cli(WiFiClient& c, uint32_t now)
+ *     В режиме CLI отправляет # по таймеру и пересылает принятые от FC символы в GUI порциями.
+ * msp::send_exit(uint32_t now)
+ *     Отправляет в FC пустую строку и exit (выход из зависшего CLI).
+ * msp::crsf_poll(WiFiClient& c, uint32_t now)
+ *     Основной цикл MSP по CRSF: передаёт ответы в GUI, отслеживает тайм-ауты, отправляет
+ *     следующий запрос и при полном отсутствии ответов переключается на UART3.
+ * msp::uart3_poll(WiFiClient& c, uint32_t now)
+ *     Запасной цикл MSP по UART3 с автовыходом из CLI, если FC зависла в нём.
+ * msp::poll(WiFiClient& c, bool ws_ready)
+ *     Вызывается из loop(): отправляет диагностику и запускает MSP по выбранному транспорту,
+ *     параллельно обслуживая CLI.
+ */
+
 /**
  * @file msp_bridge.h
  * @brief Мост ESP32 <-> полётный контроллер: MSP (опрос параметров дрона) и CLI (настройки).

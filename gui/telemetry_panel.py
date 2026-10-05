@@ -7,6 +7,17 @@
 понять, доходят ли вообще GPS-кадры с FC, если на карте почему-то не
 появлялся маркер. Теперь это видно сразу на вкладке "Каналы", даже без
 переключения на карту.
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+class TelemetryPanel
+    Виджет телеметрии CRSF от FC: батарея, углы, режим полёта, качество линка, GPS (если
+    приходит).
+  TelemetryPanel.__init__(self, parent=None)
+    Создаёт блоки «Телеметрия с дрона» и «GPS» с подписями-заглушками.
+  TelemetryPanel.update_telemetry(self, telemetry: dict)
+    Обновляет подписи из словаря телеметрии: батарея, углы, режим, RSSI/LQ/SNR, координаты и
+    спутники GPS.
 """
 
 from PyQt6.QtWidgets import QFormLayout, QGroupBox, QLabel, QVBoxLayout, QWidget

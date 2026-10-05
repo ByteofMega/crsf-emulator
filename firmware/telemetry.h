@@ -1,3 +1,26 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА telemetry.h
+ * Приём телеметрии CRSF от FC по тому же UART2 и формирование JSON для GUI. Также передаёт ответы MSP по CRSF (кадр 0x7B) в msp_crsf.h.
+ *
+ * ФУНКЦИИ:
+ * telemetry::read_i16(const uint8_t* p)
+ *     Читает знаковое 16-битное число (старший байт первым).
+ * telemetry::read_u16(const uint8_t* p)
+ *     Читает беззнаковое 16-битное число (старший байт первым).
+ * telemetry::read_u24(const uint8_t* p)
+ *     Читает беззнаковое 24-битное число (старший байт первым).
+ * telemetry::read_i32(const uint8_t* p)
+ *     Читает знаковое 32-битное число (старший байт первым).
+ * telemetry::handle_frame(uint8_t type, const uint8_t* payload, uint8_t len)
+ *     Разбирает корректный кадр CRSF: батарея, ориентация, режим полёта, статистика линка, GPS;
+ *     ответы MSP (0x7B) передаёт в msp_crsf::on_response; считает все принятые кадры.
+ * telemetry::poll()
+ *     Читает байты из Serial2, собирает кадры (синхробайт 0xC8, длина, тип, данные, CRC8) и
+ *     передаёт корректные в handle_frame.
+ * telemetry::build_json()
+ *     Формирует JSON «telemetry» с последними принятыми данными для отправки в GUI.
+ */
+
 /**
  * @file telemetry.h
  * @brief Приём телеметрии от FC (батарея, attitude, режим, линк, GPS)

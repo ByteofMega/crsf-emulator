@@ -1,4 +1,26 @@
-"""channel_widgets.py — визуальные компоненты каналов, без сетевой логики."""
+"""channel_widgets.py — визуальные компоненты каналов, без сетевой логики.
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+class ChannelRow
+    Строка одного канала: название, ползунок и числовое поле (1000-2000 мкс), связанные друг с
+    другом.
+  ChannelRow.__init__(self, index: int, name: str, default_value: int, parent=None)
+    Создаёт подпись, ползунок и поле значения и связывает их сигналы.
+  ChannelRow._slider_changed(self, value: int)
+    Ползунок сдвинут: копирует значение в поле и посылает сигнал value_changed.
+  ChannelRow._spin_changed(self, value: int)
+    Значение введено в поле: копирует его на ползунок и посылает сигнал value_changed.
+  ChannelRow.set_value_silent(self, value: int)
+    Устанавливает значение ползунка и поля без отправки сигналов (для значений, пришедших от
+    ESP32).
+class ChannelPanel
+    Прокручиваемая панель из 16 строк каналов.
+  ChannelPanel.__init__(self, parent=None)
+    Создаёт строки всех каналов со значениями по умолчанию и пробрасывает их сигналы.
+  ChannelPanel.set_all_silent(self, values: list[int])
+    Устанавливает значения всех каналов без сигналов (ожидает ровно 16 значений).
+"""
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSlider, QSpinBox, QVBoxLayout, QHBoxLayout, QWidget

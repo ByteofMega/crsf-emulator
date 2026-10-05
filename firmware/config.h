@@ -1,15 +1,30 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА config.h
+ * Константы и настройки прошивки.
+ *
+ * ФУНКЦИИ:
+ * Wi-Fi
+ *     WIFI_SSID, WIFI_EAP_* - данные внешней сети по умолчанию (затем меняются из GUI и хранятся в
+ *     NVS); AP_SSID, AP_PASS, AP_IP_* - собственная точка доступа.
+ * WebSocket
+ *     WS_PORT, WS_MAX_PAYLOAD - порт и максимальный размер входящего сообщения.
+ * CRSF (Serial2)
+ *     CRSF_SERIAL, CRSF_BAUDRATE, CRSF_RX_PIN, CRSF_TX_PIN, FRAME_PERIOD_MS - линия RC-каналов и
+ *     телеметрии к UART1 FC.
+ * FC_SERIAL (Serial1)
+ *     FC_BAUD, FC_RX_PIN, FC_TX_PIN - линия CLI к UART3 FC (GPIO25/26).
+ * Каналы
+ *     NUM_MAIN_CHANNELS, NUM_AUX_CHANNELS, TOTAL_CHANNELS, перечисление ROLL/PITCH/THROTTLE/YAW,
+ *     CHANNEL_NAMES.
+ */
+
 /**
  * @file config.h
  * @brief Все настройки и константы прошивки в одном месте.
- *
- * KFU.NET — сеть WPA2-Enterprise (802.1X), подключение по логину/паролю
- * студента. Значения ниже — это НАЧАЛЬНЫЕ/резервные данные STA-сети:
- * они используются один раз при первом старте (пока в NVS ничего не
- * сохранено — см. netcfg.h), а затем их можно поменять из GUI через
  * "Настройка Wi-Fi сети ESP32" без перепрошивки платы.
  *
  * Добавлено: ESP32 всегда поднимает собственную точку доступа
- * AP_SSID/AP_PASS — ноутбук с GUI подключается СЮДА, а не к KFU.NET
+ * AP_SSID/AP_PASS — ноутбук с GUI подключается СЮДА
  * напрямую (обход изоляции клиентов корпоративной сети).
  */
 
@@ -21,18 +36,22 @@
 static const char* WIFI_SSID = "YOUR_WIFI";
 
 // Внешний EAP-идентификатор (identity) — можно оставить таким же, как логин.
+<<<<<<< HEAD
 static const char* WIFI_EAP_IDENTITY = "YOUR_IDENTITY";
+=======
+static const char* WIFI_EAP_IDENTITY = "YOUR_LOGIN";
+>>>>>>> 448b1c9 (Updated GUI and firmware)
 
 // Логин и пароль для входа в корпоративную сеть КФУ.
 static const char* WIFI_EAP_USERNAME = "YOUR_LOGIN";
 static const char* WIFI_EAP_PASSWORD = "YOUR_PASSWORD";
 
 // ---------- Собственная точка доступа ESP32 для ноутбука с GUI ----------
-// Ноутбук подключается СЮДА, а не к KFU.NET — это обходит изоляцию
+// Ноутбук подключается сюда, — это обходит изоляцию
 // клиентов корпоративной сети. Интернет на ноутбук идёт через NAT
 // (WiFi.AP.enableNAPT), см. .ino.
 static const char* AP_SSID = "FOTON-LINK";
-static const char* AP_PASS = "foton1234";  // минимум 8 символов для WPA2
+static const char* AP_PASS = "YOUR_AP_PASSWORD";  // минимум 8 символов для WPA2
 
 #define AP_IP_1 192
 #define AP_IP_2 168

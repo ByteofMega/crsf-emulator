@@ -3,6 +3,44 @@
 Каналы RC, настройки Wi-Fi, MSP-кадры от FC, диагностика обмена и проброс CLI идут по одному WebSocket.
 last_msp_time - время (time.monotonic) последнего корректного MSP-кадра от FC: по нему CLI-клиент проверяет,
 что FC жива, прежде чем входить в CLI, и ждёт её возврата после exit/save.
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+class CrsfWsClient
+    Клиент WebSocket к ESP32: отправляет каналы, настройки Wi-Fi, MSP-запросы и CLI-строки,
+    принимает каналы, телеметрию, MSP-кадры, диагностику и вывод CLI в виде сигналов Qt.
+  CrsfWsClient.__init__(self, parent=None)
+    Создаёт QWebSocket и подключает его события; обнуляет флаг режима CLI и время последнего
+    MSP-кадра.
+  CrsfWsClient.is_connected(self)
+    True, если соединение с ESP32 установлено.
+  CrsfWsClient.connect_to(self, ip: str, port: int)
+    Открывает WebSocket по адресу ws://ip:port/.
+  CrsfWsClient.disconnect_from_host(self)
+    Закрывает WebSocket-соединение.
+  CrsfWsClient._send(self, obj: dict)
+    Отправляет словарь как JSON-сообщение; возвращает False, если соединения нет.
+  CrsfWsClient.send_channel(self, channel_index: int, value: int)
+    Отправляет значение одного канала (индекс с нуля преобразуется в номер с единицы).
+  CrsfWsClient.send_wifi_config(self, ssid, identity, username, password, enterprise=True)
+    Отправляет настройки STA-сети Wi-Fi для ESP32 (SSID, identity, логин, пароль, тип сети).
+  CrsfWsClient.request_msp(self, cmd: int)
+    Просит ESP32 один раз запросить MSP-команду; допускаются только команды чтения из списка
+    READ_CODES.
+  CrsfWsClient.cli_enter(self)
+    Просит ESP32 войти в CLI полётного контроллера и ставит флаг режима CLI.
+  CrsfWsClient.cli_line(self, text: str)
+    Отправляет строку в CLI (ESP32 добавит конец строки).
+  CrsfWsClient.cli_leave(self)
+    Просит ESP32 вернуться в режим MSP и снимает флаг CLI (команду выхода exit отправляет
+    вызывающий код).
+  CrsfWsClient._on_disconnected(self)
+    Сбрасывает флаг CLI и сообщает об обрыве соединения сигналом.
+  CrsfWsClient._on_message(self, message: str)
+    Разбирает JSON от ESP32 и рассылает его сигналами: MSP-кадр (с отметкой времени),
+    диагностика, вывод CLI, значения каналов, телеметрия CRSF.
+  CrsfWsClient._on_error(self, _error_code)
+    Передаёт текст ошибки сокета сигналом error_occurred.
 """
 
 import json

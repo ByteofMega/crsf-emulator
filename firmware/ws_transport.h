@@ -1,3 +1,23 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА ws_transport.h
+ * Минимальный WebSocket-сервер (RFC 6455) на WiFiServer/WiFiClient: рукопожатие, приём текстовых кадров клиента, отправка текстовых кадров.
+ *
+ * ФУНКЦИИ:
+ * ws::base64_encode(const uint8_t* data, size_t len)
+ *     Кодирует байты в base64 (нужно для ответа на рукопожатие).
+ * ws::compute_ws_accept(const String& client_key)
+ *     Вычисляет значение заголовка Sec-WebSocket-Accept: SHA-1 от ключа клиента и GUID протокола,
+ *     затем base64.
+ * ws::send_text(WiFiClient& client, const String& text)
+ *     Отправляет клиенту текстовый кадр WebSocket без маски (длиной до 65535 байт).
+ * ws::try_handshake(WiFiClient& client)
+ *     Читает HTTP-запрос на обновление до WebSocket (ожидание до 2 с) и отвечает кодом 101; false,
+ *     если ключа нет или запрос не пришёл.
+ * ws::read_frame(WiFiClient& client, String& out_text)
+ *     Читает один кадр от клиента, снимает маску; принимает только текстовые кадры до
+ *     WS_MAX_PAYLOAD байт; true, если получен текст.
+ */
+
 /**
  * @file ws_transport.h
  * @brief Низкоуровневый WebSocket-сервер (RFC 6455) на WiFiServer/WiFiClient.

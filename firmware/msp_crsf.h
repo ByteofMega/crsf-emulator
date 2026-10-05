@@ -1,3 +1,21 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА msp_crsf.h
+ * MSP внутри кадров CRSF по линии, которая уже передаёт RC-каналы (формат сверен с msp_shared.c Betaflight).
+ *
+ * ФУНКЦИИ:
+ * msp_crsf::note_frame(uint8_t type)
+ *     Считает каждый корректный кадр CRSF, принятый от FC (диагностика: идёт ли вообще
+ *     телеметрия).
+ * msp_crsf::send_request(uint8_t cmd)
+ *     Отправляет в FC кадр MSP_REQ (0x7A) с MSP v1 без данных: C8 07 7A C8 EA статус 00 команда
+ *     CRC8.
+ * msp_crsf::on_response(const uint8_t* p, uint8_t len)
+ *     Разбирает кадр MSP_RESP (0x7B): проверяет флаг начала и версию, извлекает команду, данные и
+ *     признак ошибки; сохраняет ответ для msp_bridge.
+ * msp_crsf::take(Resp& out)
+ *     Отдаёт принятый ответ (если есть) и освобождает слот.
+ */
+
 /**
  * @file msp_crsf.h
  * @brief MSP внутри кадров CRSF (линия ESP32 Serial2 <-> UART1 FC, та же, что передаёт RC-каналы).

@@ -3,6 +3,34 @@
 WaypointNavigator считает команды RC (ROLL, PITCH, YAW) по оценённому положению и курсу.
 Максимальная скорость теперь реально ограничивает стик PITCH:
     s_max = atan(kd * v_max^2 / g) / angle_limit      (см. position_estimator.max_stick_for_speed)
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+haversine_distance_m(lat1, lon1, lat2, lon2)
+    Расстояние между двумя точками (широта, долгота) в метрах по формуле гаверсинуса.
+initial_bearing_deg(lat1, lon1, lat2, lon2)
+    Начальный азимут от первой точки ко второй, 0-360 градусов.
+_angle_diff_deg(target_deg, current_deg)
+    Разница углов в диапазоне от -180 до 180 градусов (кратчайший поворот).
+total_path_distance_m(path: list)
+    Длина ломаной по списку точек, м.
+turn_angles_deg(path: list)
+    Углы поворота (0-180) в каждой промежуточной точке пути.
+estimate_energy_usage(path: list, max_speed_mps: float, current_a: float, capacity_mah: float, yaw_rate_dps: float=180.0)
+    Оценка маршрута: расстояние, время на прямых и поворотах, расход мАч по текущему току и
+    процент от ёмкости; None при нулевой скорости.
+class WaypointNavigator
+    Ведёт дрон через последовательность точек: по оценённому положению и курсу вычисляет
+    значения ROLL, PITCH, YAW; скорость ограничена пределом стика PITCH.
+  WaypointNavigator.__init__(self, waypoints, max_speed_mps: float, kd: float, angle_limit_deg: float, deadband_us: float=0.0, arrival_radius_m: float=3.0, brake_dist_m: float=10.0)
+    Принимает точки и лимиты (скорость, kd, угол, дедбэнд, радиус прилёта, дистанция торможения)
+    и рассчитывает максимальный стик PITCH.
+  WaypointNavigator.update(self, lat, lon, heading_deg)
+    Один шаг: определяет текущую цель (переходит к следующей при входе в радиус), курс на цель,
+    стик YAW по ошибке курса и стик PITCH с замедлением вблизи цели. Возвращает (roll, pitch,
+    yaw, готово).
+  WaypointNavigator.progress(self)
+    Номер текущей точки и общее число точек.
 """
 
 import math

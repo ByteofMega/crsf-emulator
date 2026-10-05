@@ -1,4 +1,12 @@
-"""config.py — константы и стиль GUI."""
+"""config.py — константы и стиль GUI.
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+Константы и данные файла
+    CHANNEL_NAMES, NUM_CHANNELS - 16 имён каналов и их число; MIN_US, MAX_US, DEFAULT_VALUES -
+    границы и значения каналов по умолчанию; DEFAULT_IP, DEFAULT_PORT - адрес ESP32 по
+    умолчанию; COLOR_* - цвета; STYLESHEET - стиль Qt всего приложения.
+"""
 
 CHANNEL_NAMES = ["ROLL", "PITCH", "THROTTLE", "YAW"] + [f"AUX{i}" for i in range(1, 13)]
 NUM_CHANNELS = len(CHANNEL_NAMES)

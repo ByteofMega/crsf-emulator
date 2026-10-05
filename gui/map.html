@@ -1,12 +1,26 @@
 <!DOCTYPE html>
 <html>
 <head>
+<!--
+ДОКУМЕНТАЦИЯ ФАЙЛА map.html - карта Яндекса внутри QWebEngineView (связь с Python через QWebChannel).
+ФУНКЦИИ JavaScript:
+  initMap() - создаёт карту и обработчик клика: в режиме старта клик ставит стартовую точку, иначе добавляет точку маршрута.
+  redrawRouteLine() - перерисовывает пунктирную линию маршрута (старт и точки).
+  addWaypoint(coords) - добавляет нумерованную точку маршрута и сообщает Python новый список точек.
+  notifyRouteUpdated() - отправляет в Python список точек маршрута (мост bridge.onRouteUpdated).
+  enableStartMode() - вызывается из Python: следующий клик задаст стартовую точку.
+  setStart(coords) - ставит или перемещает метку старта и сообщает Python координаты (bridge.onStartSet).
+  clearStart() - стирает старт, метку дрона и его трек.
+  resetRoute() - удаляет все точки маршрута и сообщает Python пустой список.
+  clearDroneTrack() - удаляет только трек дрона.
+  updateDronePosition(lat, lon) - вызывается из Python: двигает метку дрона (расчётная оценка, не GPS) и дописывает трек.
+-->
 <meta charset="utf-8">
 <title>Карта маршрута</title>
 <style>
   html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
 </style>
-<script src="https://api-maps.yandex.ru/2.1/?apikey=d1a840ca-4c99-4bc8-b630-1bf842f3dbcb&amp;lang=ru_RU"></script>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=YOUR_API_KEY&amp;lang=ru_RU"></script>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 </head>
 <body>

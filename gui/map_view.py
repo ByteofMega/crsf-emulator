@@ -2,6 +2,36 @@
 
 map.html раздаётся через локальный HTTP-сервер (нужно для Referer с ключом API Яндекс.Карт).
 Режим выбора СТАРТОВОЙ точки (оператор кликает по карте): сигнал start_set.
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+_find_free_port(preferred: int=8642)
+    Подбирает свободный TCP-порт localhost (предпочитает 8642).
+_start_local_server(directory: str, port: int)
+    Запускает в фоне простой HTTP-сервер для раздачи map.html (нужен для корректного Referer с
+    ключом API Яндекс.Карт).
+class MapBridge
+    Мост JS -> Python через QWebChannel: получает от карты список точек маршрута и стартовую
+    точку.
+  MapBridge.onRouteUpdated(self, waypoints_json: str)
+    Вызывается из JavaScript при изменении маршрута; разбирает JSON и посылает сигнал
+    route_updated со списком точек.
+  MapBridge.onStartSet(self, lat: float, lon: float)
+    Вызывается из JavaScript при выборе стартовой точки; посылает сигнал start_set.
+class MapView
+    Виджет карты Яндекса (QWebEngineView) с методами управления маркерами из Python.
+  MapView.__init__(self, parent=None)
+    Поднимает локальный сервер, регистрирует мост и загружает map.html.
+  MapView.update_drone_position(self, lat: float, lon: float)
+    Передаёт карте новую расчётную позицию дрона (маркер и трек).
+  MapView.enable_start_mode(self)
+    Включает режим: следующий клик по карте задаёт стартовую точку.
+  MapView.clear_route(self)
+    Удаляет с карты все точки маршрута.
+  MapView.clear_track(self)
+    Удаляет трек дрона (метка остаётся).
+  MapView.clear_start(self)
+    Стирает стартовую точку, метку дрона и трек.
 """
 
 import json

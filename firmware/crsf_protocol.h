@@ -1,3 +1,21 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА crsf_protocol.h
+ * Протокол CRSF для передачи RC-каналов в FC: контрольная сумма, упаковка каналов, сборка и отправка кадра.
+ *
+ * ФУНКЦИИ:
+ * crsf::build_crc8_table()
+ *     Строит таблицу CRC8 с полиномом 0xD5 (DVB-S2); вызывается один раз в setup().
+ * crsf::crc8_dvb_s2(const uint8_t* data, size_t len)
+ *     Считает CRC8 по массиву байт с помощью таблицы.
+ * crsf::us_to_crsf(int us)
+ *     Переводит длительность импульса 1000-2000 мкс в значение канала CRSF (центр 992).
+ * crsf::pack_channels_11bit(const uint16_t* channels, uint8_t* out)
+ *     Упаковывает 16 каналов по 11 бит (младшими битами вперёд) в 22 байта полезной нагрузки.
+ * crsf::send_crsf_frame(const uint16_t* rc_channels_us)
+ *     Собирает кадр RC_CHANNELS (адрес 0xC8, тип 0x16, 22 байта данных, CRC8) и отправляет его в
+ *     Serial2.
+ */
+
 /**
  * @file crsf_protocol.h
  * @brief CRC8, упаковка каналов, сборка и отправка кадра RC_CHANNELS по UART.

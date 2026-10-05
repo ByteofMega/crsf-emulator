@@ -13,6 +13,71 @@
 - лимит наклона в ANGLE: angle_limit (4.5 и новее), level_limit (4.0-4.4);
 - P-усиление самовыравнивания: angle_p_gain (4.5 и новее), angle_level_strength (4.0-4.4).
 Пока версия неизвестна, опрашиваются оба варианта.
+
+ФУНКЦИИ И КЛАССЫ ФАЙЛА
+----------------------
+_from_raw(raw: str, scale: float, offset: float)
+    Значение из CLI (целое) -> число для GUI: деление на масштаб, вычитание смещения.
+_to_raw(value: float, scale: float, offset: float)
+    Число из GUI -> целое значение для команды set: добавление смещения, умножение на масштаб,
+    округление.
+filter_candidates(cands: list, fw)
+    Оставляет имена параметров, подходящие версии прошивки (4.0-4.4 или 4.5+); для неизвестной
+    версии возвращает все имена.
+class FcSettingsPanel
+    Вкладка «Настройки FC»: параметры маршрута и FC, калибровка kd, дамп CLI, ручная команда и
+    консоль. На время обмена блокируются только кнопки CLI.
+  FcSettingsPanel.__init__(self, ws_client, nav_active=None, parent=None)
+    Создаёт все элементы вкладки, подключает получение версии прошивки по MSP (через 1,5 с после
+    подключения запрашивает FC_VERSION).
+  FcSettingsPanel._on_msp_version(self, cmd, data, err)
+    Запоминает версию Betaflight из ответа MSP_FC_VERSION.
+  FcSettingsPanel.is_busy(self)
+    True, пока идёт обмен с FC по CLI.
+  FcSettingsPanel._begin(self, what: str)
+    Начинает операцию с FC: отключает кнопки CLI, показывает статус и посылает сигнал
+    busy_changed; False, если уже занято.
+  FcSettingsPanel._end(self, message: str='')
+    Заканчивает операцию: включает кнопки, показывает итоговое сообщение, посылает busy_changed.
+  FcSettingsPanel._clear_console(self)
+    Очищает консоль CLI.
+  FcSettingsPanel._log_to_console(self, line: str)
+    Добавляет строку в консоль (первая строка заменяет подсказку).
+  FcSettingsPanel._apply_manual_inputs(self, silent: bool=False)
+    Считывает числа из полей ввода в словарь limits; при ошибке показывает предупреждение (или
+    молча возвращает False).
+  FcSettingsPanel._param_scale(self, param: dict, resolved_name: str)
+    Масштаб параметра с учётом найденного имени переменной.
+  FcSettingsPanel._ready(self, need_idle_nav: bool=False)
+    Проверяет, что можно работать с CLI: FC не занята, есть соединение, маршрут не выполняется.
+  FcSettingsPanel._requests(self)
+    Формирует запрос чтения: ключ параметра -> имена-кандидаты, отфильтрованные по версии
+    прошивки.
+  FcSettingsPanel._load_names(self)
+    Читает из QSettings имена параметров, найденные при прошлых чтениях.
+  FcSettingsPanel._save_names(self, found: dict)
+    Сохраняет в QSettings найденные имена параметров.
+  FcSettingsPanel._fail(self, title: str, exc: Exception)
+    Показывает ошибку операции в консоли и диалоге (прерывание CliAborted не показывается).
+  FcSettingsPanel._read_from_fc(self)
+    Кнопка «Прочитать с FC»: входит в CLI, читает параметры с подтверждением, выходит из CLI и
+    заполняет поля; показывает, сколько параметров прочитано.
+  FcSettingsPanel._write_to_fc(self)
+    Кнопка «Записать на FC»: читает текущие значения, записывает только изменённые с
+    подтверждением и делает save, если всё подтверждено; иначе выходит без сохранения.
+  FcSettingsPanel._calibrate_kd(self)
+    Вычисляет коэффициент сопротивления kd по стику, дистанции и времени пролёта и подставляет
+    его в поле.
+  FcSettingsPanel._dump(self, kind: str)
+    Кнопки «dump all» и «diff all»: получает полный список настроек FC и запоминает его для
+    сохранения в файл.
+  FcSettingsPanel._save_dump(self)
+    Сохраняет последний полученный дамп CLI в текстовый файл.
+  FcSettingsPanel._send_manual(self)
+    Отправляет введённую пользователем команду CLI (опасные команды save, exit, defaults и
+    подобные заблокированы).
+  FcSettingsPanel.get_limits(self, silent: bool=False)
+    Возвращает словарь текущих значений полей (silent=True - без окон при ошибке ввода).
 """
 
 from PyQt6.QtCore import QSettings, QTimer, pyqtSignal

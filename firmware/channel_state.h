@@ -1,12 +1,20 @@
+/*
+ * ДОКУМЕНТАЦИЯ ФАЙЛА channel_state.h
+ * Модель состояния 16 RC-каналов, отправляемых в FC, и разбор входящих сообщений GUI.
+ *
+ * ФУНКЦИИ:
+ * state::init_defaults()
+ *     Начальные значения: ROLL, PITCH, YAW = 1500, THROTTLE и AUX = 1000.
+ * state::build_state_json()
+ *     Формирует JSON {"channels": [...]} с текущими значениями каналов.
+ * state::apply_client_message(const String& text)
+ *     Сообщение от GUI: настройки Wi-Fi уходят в netcfg, «cli» и «msp_req» - в msp_bridge, иначе
+ *     разбирается как {"channel": N, "value": us}. Возвращает true, если каналы изменились.
+ */
+
 /**
  * @file channel_state.h
  * @brief Модель данных каналов (GUI -> FC) + JSON.
- *
- * Обновлено: apply_client_message() теперь сначала проверяет, не
- * является ли сообщение конфигом сети (см. netcfg.h, ключ "wifi") —
- * если да, отдаёт обработку туда и не трогает каналы. Это позволяет
- * слать по одному и тому же WebSocket и команды каналов, и новые
- * настройки Wi-Fi, без конфликта форматов.
  */
 #pragma once
 #include <ArduinoJson.h>
