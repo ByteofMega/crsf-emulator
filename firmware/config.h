@@ -18,14 +18,14 @@
 #include <Arduino.h>
 
 // ---------- Wi-Fi: STA-сеть по умолчанию (используется при первом старте) ----------
-static const char* WIFI_SSID = "KFU.NET";
+static const char* WIFI_SSID = "YOUR_WIFI";
 
 // Внешний EAP-идентификатор (identity) — можно оставить таким же, как логин.
-static const char* WIFI_EAP_IDENTITY = "ArMSalakhov";
+static const char* WIFI_EAP_IDENTITY = "YOUR_IDENTITY";
 
 // Логин и пароль для входа в корпоративную сеть КФУ.
-static const char* WIFI_EAP_USERNAME = "ArMSalakhov";
-static const char* WIFI_EAP_PASSWORD = "TIMQrh1h2o";
+static const char* WIFI_EAP_USERNAME = "YOUR_LOGIN";
+static const char* WIFI_EAP_PASSWORD = "YOUR_PASSWORD";
 
 // ---------- Собственная точка доступа ESP32 для ноутбука с GUI ----------
 // Ноутбук подключается СЮДА, а не к KFU.NET — это обходит изоляцию
