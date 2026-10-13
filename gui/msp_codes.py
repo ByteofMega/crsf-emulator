@@ -31,30 +31,48 @@ decode(cmd: int, data: bytes)
 format_decoded(d: dict)
     Превращает словарь расшифровки в одну строку «ключ=значение, ...» для таблицы.
 Константы и данные файла
-    READ_CODES - код -> имя разрешённых команд чтения; SENSOR_BITS - биты датчиков в STATUS;
+    MSP_* - именованные коды команд (используйте их вместо чисел); READ_CODES - код -> имя разрешённых команд чтения; SENSOR_BITS - биты датчиков в STATUS;
     ACC_1G - масштаб акселерометра; _DECODERS - таблица код -> функция расшифровки.
 """
 
 import struct
 
+MSP_API_VERSION = 1
+MSP_FC_VARIANT = 2
+MSP_FC_VERSION = 3
+MSP_BOARD_INFO = 4
+MSP_BUILD_INFO = 5
+MSP_NAME = 10
+MSP_STATUS = 101
+MSP_RAW_IMU = 102
+MSP_MOTOR = 104
+MSP_RC = 105
+MSP_ATTITUDE = 108
+MSP_ALTITUDE = 109
+MSP_ANALOG = 110
+MSP_RC_TUNING = 111
+MSP_PID = 112
+MSP_BATTERY_STATE = 130
+MSP_STATUS_EX = 150
+
 READ_CODES = {
-    1: "API_VERSION",
-    2: "FC_VARIANT",
-    3: "FC_VERSION",
-    4: "BOARD_INFO",
-    5: "BUILD_INFO",
-    10: "NAME",
-    101: "STATUS",
-    102: "RAW_IMU",
-    104: "MOTOR",
-    105: "RC",
-    108: "ATTITUDE",
-    109: "ALTITUDE",
-    110: "ANALOG",
-    111: "RC_TUNING",
-    112: "PID",
-    130: "BATTERY_STATE",
-    150: "STATUS_EX",
+    MSP_API_VERSION: "API_VERSION",
+    MSP_FC_VARIANT: "FC_VARIANT",
+    MSP_FC_VERSION: "FC_VERSION",
+    MSP_BOARD_INFO: "BOARD_INFO",
+    MSP_BUILD_INFO: "BUILD_INFO",
+    MSP_NAME: "NAME",
+    MSP_STATUS: "STATUS",
+    MSP_RAW_IMU: "RAW_IMU",
+    MSP_MOTOR: "MOTOR",
+    MSP_RC: "RC",
+    MSP_ATTITUDE: "ATTITUDE",
+    MSP_ALTITUDE: "ALTITUDE",
+    MSP_ANALOG: "ANALOG",
+    MSP_RC_TUNING: "RC_TUNING",
+    MSP_PID: "PID",
+    MSP_BATTERY_STATE: "BATTERY_STATE",
+    MSP_STATUS_EX: "STATUS_EX",
 }
 
 SENSOR_BITS = {0x01: "ACC", 0x02: "BARO", 0x04: "MAG", 0x08: "GPS", 0x10: "SONAR", 0x20: "GYRO"}
@@ -118,21 +136,21 @@ def _battery_state(d):
 
 
 _DECODERS = {
-    1: lambda d: {"protocol": d[0], "api": f"{d[1]}.{d[2]}"},
-    2: lambda d: {"variant": _ascii(d[:4])},
-    3: lambda d: {"version": f"{d[0]}.{d[1]}.{d[2]}"},
-    4: lambda d: {"board": _ascii(d[:4])},
-    5: lambda d: {"build": _ascii(d)},
-    10: lambda d: {"name": _ascii(d)},
-    101: _status,
-    102: _raw_imu,
-    104: _u16_list,
-    105: _u16_list,
-    108: _attitude,
-    109: _altitude,
-    110: _analog,
-    130: _battery_state,
-    150: _status,
+    MSP_API_VERSION: lambda d: {"protocol": d[0], "api": f"{d[1]}.{d[2]}"},
+    MSP_FC_VARIANT: lambda d: {"variant": _ascii(d[:4])},
+    MSP_FC_VERSION: lambda d: {"version": f"{d[0]}.{d[1]}.{d[2]}"},
+    MSP_BOARD_INFO: lambda d: {"board": _ascii(d[:4])},
+    MSP_BUILD_INFO: lambda d: {"build": _ascii(d)},
+    MSP_NAME: lambda d: {"name": _ascii(d)},
+    MSP_STATUS: _status,
+    MSP_RAW_IMU: _raw_imu,
+    MSP_MOTOR: _u16_list,
+    MSP_RC: _u16_list,
+    MSP_ATTITUDE: _attitude,
+    MSP_ALTITUDE: _altitude,
+    MSP_ANALOG: _analog,
+    MSP_BATTERY_STATE: _battery_state,
+    MSP_STATUS_EX: _status,
 }
 
 

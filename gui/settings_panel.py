@@ -4,6 +4,9 @@
 карта, каналы, вкладка MSP, отключение - остаётся рабочим. Сигнал busy_changed позволяет главному окну
 заблокировать запуск маршрута, пока FC занята (она перезагружается после выхода из CLI).
 
+Настройки хранятся в словаре limits и обновляются по мере ввода (textChanged), поэтому get_limits() не
+разбирает поля заново при каждом вызове (его дёргают таймеры 50 мс).
+
 Чтение: значения подтверждаются двумя одинаковыми ответами и проверяются по "Allowed range" (cli_ws.read_many).
 Запись: пишутся только изменённые параметры; каждое записанное значение перечитывается и подтверждается;
 сохранение (save, перезагрузка FC) выполняется только если подтверждено ВСЁ, иначе изменения сбрасываются.
@@ -19,65 +22,28 @@
 _from_raw(raw: str, scale: float, offset: float)
     Значение из CLI (целое) -> число для GUI: деление на масштаб, вычитание смещения.
 _to_raw(value: float, scale: float, offset: float)
-    Число из GUI -> целое значение для команды set: добавление смещения, умножение на масштаб,
-    округление.
+    Число из GUI -> целое значение для команды set: добавление смещения, умножение на масштаб, округление.
 filter_candidates(cands: list, fw)
-    Оставляет имена параметров, подходящие версии прошивки (4.0-4.4 или 4.5+); для неизвестной
-    версии возвращает все имена.
+    Оставляет имена параметров, подходящие версии прошивки (4.0-4.4 или 4.5+); для неизвестной версии - все.
 class FcSettingsPanel
-    Вкладка «Настройки FC»: параметры маршрута и FC, калибровка kd, дамп CLI, ручная команда и
-    консоль. На время обмена блокируются только кнопки CLI.
-  FcSettingsPanel.__init__(self, ws_client, nav_active=None, parent=None)
-    Создаёт все элементы вкладки, подключает получение версии прошивки по MSP (через 1,5 с после
-    подключения запрашивает FC_VERSION).
-  FcSettingsPanel._on_msp_version(self, cmd, data, err)
-    Запоминает версию Betaflight из ответа MSP_FC_VERSION.
-  FcSettingsPanel.is_busy(self)
-    True, пока идёт обмен с FC по CLI.
-  FcSettingsPanel._begin(self, what: str)
-    Начинает операцию с FC: отключает кнопки CLI, показывает статус и посылает сигнал
-    busy_changed; False, если уже занято.
-  FcSettingsPanel._end(self, message: str='')
-    Заканчивает операцию: включает кнопки, показывает итоговое сообщение, посылает busy_changed.
-  FcSettingsPanel._clear_console(self)
-    Очищает консоль CLI.
-  FcSettingsPanel._log_to_console(self, line: str)
-    Добавляет строку в консоль (первая строка заменяет подсказку).
-  FcSettingsPanel._apply_manual_inputs(self, silent: bool=False)
-    Считывает числа из полей ввода в словарь limits; при ошибке показывает предупреждение (или
-    молча возвращает False).
-  FcSettingsPanel._param_scale(self, param: dict, resolved_name: str)
-    Масштаб параметра с учётом найденного имени переменной.
-  FcSettingsPanel._ready(self, need_idle_nav: bool=False)
-    Проверяет, что можно работать с CLI: FC не занята, есть соединение, маршрут не выполняется.
-  FcSettingsPanel._requests(self)
-    Формирует запрос чтения: ключ параметра -> имена-кандидаты, отфильтрованные по версии
-    прошивки.
-  FcSettingsPanel._load_names(self)
-    Читает из QSettings имена параметров, найденные при прошлых чтениях.
-  FcSettingsPanel._save_names(self, found: dict)
-    Сохраняет в QSettings найденные имена параметров.
-  FcSettingsPanel._fail(self, title: str, exc: Exception)
-    Показывает ошибку операции в консоли и диалоге (прерывание CliAborted не показывается).
-  FcSettingsPanel._read_from_fc(self)
-    Кнопка «Прочитать с FC»: входит в CLI, читает параметры с подтверждением, выходит из CLI и
-    заполняет поля; показывает, сколько параметров прочитано.
-  FcSettingsPanel._write_to_fc(self)
-    Кнопка «Записать на FC»: читает текущие значения, записывает только изменённые с
-    подтверждением и делает save, если всё подтверждено; иначе выходит без сохранения.
-  FcSettingsPanel._calibrate_kd(self)
-    Вычисляет коэффициент сопротивления kd по стику, дистанции и времени пролёта и подставляет
-    его в поле.
-  FcSettingsPanel._dump(self, kind: str)
-    Кнопки «dump all» и «diff all»: получает полный список настроек FC и запоминает его для
-    сохранения в файл.
-  FcSettingsPanel._save_dump(self)
-    Сохраняет последний полученный дамп CLI в текстовый файл.
-  FcSettingsPanel._send_manual(self)
-    Отправляет введённую пользователем команду CLI (опасные команды save, exit, defaults и
-    подобные заблокированы).
-  FcSettingsPanel.get_limits(self, silent: bool=False)
-    Возвращает словарь текущих значений полей (silent=True - без окон при ошибке ввода).
+    Вкладка «Настройки FC»: параметры маршрута и FC, калибровка kd, дамп CLI, ручная команда и консоль.
+  __init__(self, ws_client, nav_active=None, parent=None)
+    Создаёт элементы вкладки; через 1,5 с после подключения запрашивает MSP_FC_VERSION.
+  _on_msp_version(self, cmd, data, err) - запоминает версию Betaflight.
+  is_busy(self) / _begin(self, what) / _end(self, message='') - занятость и блокировка кнопок CLI.
+  abort(self) - прервать текущий обмен с FC (закрытие окна).
+  _run_cli(self, what, fail_title, abort_message, work)
+    Общая обёртка всех операций CLI: занять панель, создать клиента, выполнить work(client) -> сообщение,
+    при ошибке закрыть клиента и показать ошибку, освободить панель.
+  _read_from_fc / _write_to_fc / _dump / _send_manual - кнопки; _do_read / _do_write / _do_dump / _do_manual -
+    тела операций для _run_cli.
+  _clear_console / _log_to_console - консоль CLI.
+  _on_field_changed(self, key) / _fields_valid(self) / get_limits(self, silent=False)
+    Текущие значения полей (silent=True - без окон при ошибке ввода).
+  _ready(self, need_idle_nav=False) - можно ли работать с CLI.
+  _requests / _load_names / _save_names / _fail - служебное.
+  _calibrate_kd(self) - kd по стику, дистанции и времени пролёта.
+  _save_dump(self) - сохранить последний дамп в файл.
 """
 
 from PyQt6.QtCore import QSettings, QTimer, pyqtSignal
@@ -87,8 +53,9 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-import cli_ws
-from cli_ws import FcCliClient, same_number
+from cli_ws import CliAborted, FcCliClient, same_number
+from common import parse_float
+from msp_codes import MSP_FC_VERSION
 from position_estimator import calibrate_kd
 
 
@@ -131,6 +98,8 @@ CONSOLE_PLACEHOLDER = (
     "Нажмите «Прочитать с FC», «Записать на FC» или «dump all»."
 )
 
+BLOCKED_COMMANDS = {"save", "exit", "bl", "defaults", "dfu", "resource", "flash_erase", "reboot"}
+
 
 def filter_candidates(cands: list, fw) -> list:
     """Оставить имена, подходящие версии прошивки fw = (major, minor, patch); неизвестная версия - все имена."""
@@ -148,13 +117,16 @@ class FcSettingsPanel(QScrollArea):
         self._ws = ws_client
         self._nav_active = nav_active if nav_active is not None else (lambda: False)
         self.limits = {p["key"]: p["default"] for p in FC_PARAMS}
+        self._bad_fields: set = set()       # ключи полей, где сейчас не число
         self._last_dump = ""
         self._busy = False
+        self._client = None                 # клиент текущей операции CLI (для abort)
         self._fw = None
+        self._console_has_real_output = False
         self._cli_widgets = []
         self._qs = QSettings("CRSFEmulator", "GUI")
         self._ws.msp_received.connect(self._on_msp_version)
-        self._ws.connected.connect(lambda: QTimer.singleShot(1500, lambda: self._ws.request_msp(3)))
+        self._ws.connected.connect(lambda: QTimer.singleShot(1500, lambda: self._ws.request_msp(MSP_FC_VERSION)))
 
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -167,6 +139,7 @@ class FcSettingsPanel(QScrollArea):
         for p in FC_PARAMS:
             field = QLineEdit(str(p["default"]))
             field.setMinimumHeight(26)
+            field.textChanged.connect(lambda _text, key=p["key"]: self._on_field_changed(key))
             self.inputs[p["key"]] = field
             params_layout.addRow(f"{p['label']}:", field)
         read_btn = QPushButton("Прочитать с FC")
@@ -196,10 +169,9 @@ class FcSettingsPanel(QScrollArea):
 
         dump_box = QGroupBox("Полный дамп настроек CLI")
         dump_layout = QHBoxLayout(dump_box)
-        for text, handler in (("dump all", lambda: self._dump("dump all")),
-                              ("diff all", lambda: self._dump("diff all"))):
+        for text in ("dump all", "diff all"):
             b = QPushButton(text)
-            b.clicked.connect(handler)
+            b.clicked.connect(lambda _checked=False, kind=text: self._dump(kind))
             dump_layout.addWidget(b)
             self._cli_widgets.append(b)
         save_dump_btn = QPushButton("Сохранить дамп в файл")
@@ -225,9 +197,7 @@ class FcSettingsPanel(QScrollArea):
         self.console.setReadOnly(True)
         self.console.setPlainText(CONSOLE_PLACEHOLDER)
         self.console.setMinimumHeight(200)
-        self.console.setStyleSheet(
-            "QPlainTextEdit { background-color: #000000; color: #00E676; border: 1px solid #00A854;"
-            " border-radius: 4px; padding: 6px; }")
+        self.console.setObjectName("console")   # цвета берутся из темы (config.py)
         mono = QFont("Consolas")
         mono.setStyleHint(QFont.StyleHint.Monospace)
         mono.setPointSize(10)
@@ -238,14 +208,12 @@ class FcSettingsPanel(QScrollArea):
         console_layout.addWidget(clear_btn)
         layout.addWidget(console_box)
 
-        self._console_has_real_output = False
-
         self.setWidgetResizable(True)
         self.setWidget(content)
 
     # ---------- версия прошивки (по MSP_FC_VERSION) ----------
     def _on_msp_version(self, cmd, data, err):
-        if cmd == 3 and not err and len(data) >= 3:
+        if cmd == MSP_FC_VERSION and not err and len(data) >= 3:
             self._fw = (data[0], data[1], data[2])
 
     # ---------- занятость: блокируются только кнопки CLI ----------
@@ -255,7 +223,6 @@ class FcSettingsPanel(QScrollArea):
     def _begin(self, what: str) -> bool:
         if self._busy:
             return False
-        cli_ws.reset_abort()
         self._busy = True
         for w in self._cli_widgets:
             w.setEnabled(False)
@@ -270,6 +237,28 @@ class FcSettingsPanel(QScrollArea):
         self.status_label.setText(message)
         self.busy_changed.emit(False)
 
+    def abort(self):
+        """Прервать текущий обмен с FC (вызывается при закрытии окна)."""
+        if self._client is not None:
+            self._client.abort()
+
+    def _run_cli(self, what: str, fail_title: str, abort_message: str, work):
+        """Общая обёртка операции CLI: work(client) -> итоговое сообщение для строки статуса."""
+        if not self._begin(what):
+            return
+        client = FcCliClient(self._ws, log_callback=self._log_to_console)
+        self._client = client
+        message = ""
+        try:
+            message = work(client) or ""
+        except Exception as exc:
+            client.close()
+            message = abort_message
+            self._fail(fail_title, exc)
+        finally:
+            self._client = None
+            self._end(message)
+
     # ---------- консоль ----------
     def _clear_console(self):
         self.console.clear()
@@ -282,20 +271,22 @@ class FcSettingsPanel(QScrollArea):
         self.console.appendPlainText(line)
 
     # ---------- параметры ----------
-    def _apply_manual_inputs(self, silent: bool = False) -> bool:
-        parsed = {}
+    def _on_field_changed(self, key: str):
         try:
-            for key, field in self.inputs.items():
-                parsed[key] = float(field.text().replace(",", "."))
+            self.limits[key] = parse_float(self.inputs[key].text())
+            self._bad_fields.discard(key)
         except ValueError:
-            if not silent:
-                QMessageBox.warning(self, "Ошибка ввода", "Все поля должны быть числами.")
-            return False
-        self.limits.update(parsed)
-        return True
+            self._bad_fields.add(key)
 
-    def _param_scale(self, param: dict, resolved_name: str) -> float:
-        return param.get("scale_by_name", {}).get(resolved_name, param["scale"])
+    def _fields_valid(self, silent: bool = False) -> bool:
+        if self._bad_fields and not silent:
+            QMessageBox.warning(self, "Ошибка ввода", "Все поля должны быть числами.")
+        return not self._bad_fields
+
+    def get_limits(self, silent: bool = False) -> dict:
+        """Текущие значения параметров (silent=True - без всплывающих окон, для таймеров)."""
+        self._fields_valid(silent)
+        return dict(self.limits)
 
     def _ready(self, need_idle_nav: bool = False) -> bool:
         if self._busy:
@@ -326,128 +317,110 @@ class FcSettingsPanel(QScrollArea):
             self._qs.setValue(f"fc_names/{key}", name)
 
     def _fail(self, title: str, exc: Exception):
-        if isinstance(exc, cli_ws.CliAborted):
+        if isinstance(exc, CliAborted):
             return
         self._log_to_console(f"!! {title}: {exc}")
         QMessageBox.critical(self, title, str(exc))
 
+    # ---------- чтение и запись настроек FC ----------
     def _read_from_fc(self):
-        if not self._ready(True) or not self._begin("Чтение настроек с FC"):
-            return
-        client = FcCliClient(self._ws, log_callback=self._log_to_console)
-        message = ""
-        try:
-            client.enter_cli()
-            requests = self._requests()
-            found = client.read_many(requests, cached=self._load_names())
-            client.exit_cli(save_changes=False)
-            total = len(requests)
-            for p in FC_PARAMS:
-                if p["key"] not in found:
-                    continue
-                name, raw = found[p["key"]]
-                self.inputs[p["key"]].setText(f"{_from_raw(raw, self._param_scale(p, name), p['offset']):.3f}")
-            self._save_names(found)
-            self._apply_manual_inputs()
-            if not found:
-                message = "Ни один параметр не прочитан: FC не отвечает на CLI-команды."
-                self._log_to_console("!! " + message)
-            else:
-                missing = [k for k in requests if k not in found]
-                message = f"Прочитано параметров: {len(found)} из {total}" + (f"; не найдено: {', '.join(missing)}" if missing else "")
-                self._log_to_console("-- " + message)
-                for key, (name, raw) in found.items():
-                    self._log_to_console(f"   {key} <- {name} = {raw}")
-        except Exception as exc:
-            client.close()
-            message = "Чтение прервано"
-            self._fail("Ошибка чтения CLI", exc)
-        finally:
-            self._end(message)
+        if self._ready(True):
+            self._run_cli("Чтение настроек с FC", "Ошибка чтения CLI", "Чтение прервано", self._do_read)
+
+    def _do_read(self, client) -> str:
+        client.enter_cli()
+        requests = self._requests()
+        found = client.read_many(requests, cached=self._load_names())
+        client.exit_cli(save_changes=False)
+        for p in FC_PARAMS:
+            if p["key"] not in found:
+                continue
+            name, raw = found[p["key"]]
+            self.inputs[p["key"]].setText(f"{_from_raw(raw, p['scale'], p['offset']):.3f}")
+        self._save_names(found)
+        if not found:
+            message = "Ни один параметр не прочитан: FC не отвечает на CLI-команды."
+            self._log_to_console("!! " + message)
+            return message
+        missing = [k for k in requests if k not in found]
+        message = (f"Прочитано параметров: {len(found)} из {len(requests)}"
+                   + (f"; не найдено: {', '.join(missing)}" if missing else ""))
+        self._log_to_console("-- " + message)
+        for key, (name, raw) in found.items():
+            self._log_to_console(f"   {key} <- {name} = {raw}")
+        return message
 
     def _write_to_fc(self):
-        if not self._apply_manual_inputs() or not self._ready(True):
+        if not self._fields_valid() or not self._ready(True):
             return
         confirm = QMessageBox.question(
             self, "Подтверждение",
             "Будут записаны только изменённые параметры. После записи FC перезагрузится. Продолжить?")
-        if confirm != QMessageBox.StandardButton.Yes or not self._begin("Запись настроек на FC"):
-            return
-        client = FcCliClient(self._ws, log_callback=self._log_to_console)
-        message = ""
-        try:
-            client.enter_cli()
-            current = client.read_many(self._requests(), cached=self._load_names())
-            self._save_names(current)
-            changes = []
-            for p in FC_PARAMS:
-                if not p["candidates"]:
-                    continue
-                if p["key"] not in current:
-                    self._log_to_console(f"-- {p['key']}: параметр не найден/не подтверждён, пропущен")
-                    continue
-                name, raw_old = current[p["key"]]
-                raw_new = _to_raw(self.limits[p["key"]], self._param_scale(p, name), p["offset"])
-                if not same_number(raw_old, raw_new):
-                    changes.append((name, raw_new))
-            if not changes:
-                message = "Изменений нет: запись и перезагрузка FC не нужны"
-                self._log_to_console("-- " + message)
-                client.exit_cli(save_changes=False)
-            else:
-                failed = client.write_verified(changes)
-                if failed:
-                    client.exit_cli(save_changes=False)     # без save: изменения сбрасываются
-                    message = f"Не удалось подтвердить запись: {', '.join(failed)}. Ничего не сохранено."
-                    self._log_to_console("!! " + message)
-                    QMessageBox.warning(self, "Запись не подтверждена", message)
-                else:
-                    client.exit_cli(save_changes=True)
-                    message = f"Записано и подтверждено параметров: {len(changes)}. FC перезагружена."
-                    self._log_to_console("-- " + message)
-        except Exception as exc:
-            client.close()
-            message = "Запись прервана, настройки на FC не сохранены"
-            self._fail("Ошибка записи CLI", exc)
-        finally:
-            self._end(message)
+        if confirm == QMessageBox.StandardButton.Yes:
+            self._run_cli("Запись настроек на FC", "Ошибка записи CLI",
+                          "Запись прервана, настройки на FC не сохранены", self._do_write)
+
+    def _do_write(self, client) -> str:
+        client.enter_cli()
+        current = client.read_many(self._requests(), cached=self._load_names())
+        self._save_names(current)
+        changes = []
+        for p in FC_PARAMS:
+            if not p["candidates"]:
+                continue
+            if p["key"] not in current:
+                self._log_to_console(f"-- {p['key']}: параметр не найден/не подтверждён, пропущен")
+                continue
+            name, raw_old = current[p["key"]]
+            raw_new = _to_raw(self.limits[p["key"]], p["scale"], p["offset"])
+            if not same_number(raw_old, raw_new):
+                changes.append((name, raw_new))
+        if not changes:
+            message = "Изменений нет: запись и перезагрузка FC не нужны"
+            self._log_to_console("-- " + message)
+            client.exit_cli(save_changes=False)
+            return message
+        failed = client.write_verified(changes)
+        if failed:
+            client.exit_cli(save_changes=False)     # без save: изменения сбрасываются
+            message = f"Не удалось подтвердить запись: {', '.join(failed)}. Ничего не сохранено."
+            self._log_to_console("!! " + message)
+            QMessageBox.warning(self, "Запись не подтверждена", message)
+            return message
+        client.exit_cli(save_changes=True)
+        message = f"Записано и подтверждено параметров: {len(changes)}. FC перезагружена."
+        self._log_to_console("-- " + message)
+        return message
 
     # ---------- калибровка ----------
     def _calibrate_kd(self):
         try:
-            stick = float(self.cal_stick.text().replace(",", ".")) / 100.0
-            dist = float(self.cal_dist.text().replace(",", "."))
-            t = float(self.cal_time.text().replace(",", "."))
-            lim = float(self.inputs["max_tilt_deg"].text().replace(",", "."))
+            stick = parse_float(self.cal_stick.text()) / 100.0
+            dist = parse_float(self.cal_dist.text())
+            t = parse_float(self.cal_time.text())
+            lim = parse_float(self.inputs["max_tilt_deg"].text())
             if min(stick, dist, t, lim) <= 0:
                 raise ValueError
         except ValueError:
             QMessageBox.warning(self, "Калибровка", "Заполните стик, дистанцию и время положительными числами.")
             return
         kd = calibrate_kd(stick, lim, dist, t)
-        self.inputs["drag_kd"].setText(f"{kd:.5f}")
-        self._apply_manual_inputs()
+        self.inputs["drag_kd"].setText(f"{kd:.5f}")     # textChanged обновит limits
         self._log_to_console(f"-- kd = {kd:.5f} (v = {dist / t:.2f} м/с при угле {stick * lim:.1f}°)")
 
     # ---------- дамп и ручные команды ----------
     def _dump(self, kind: str):
-        if not self._ready(True) or not self._begin(f"Команда {kind}"):
-            return
-        client = FcCliClient(self._ws, log_callback=self._log_to_console)
-        message = ""
-        try:
-            client.enter_cli()
-            lines = client.dump(kind)
-            client.exit_cli(save_changes=False)
-            self._last_dump = "\n".join(lines)
-            message = f"{kind}: получено строк {len(lines)}"
-            self._log_to_console("-- " + message)
-        except Exception as exc:
-            client.close()
-            message = "Операция прервана"
-            self._fail("Ошибка CLI", exc)
-        finally:
-            self._end(message)
+        if self._ready(True):
+            self._run_cli(f"Команда {kind}", "Ошибка CLI", "Операция прервана", lambda c: self._do_dump(c, kind))
+
+    def _do_dump(self, client, kind: str) -> str:
+        client.enter_cli()
+        lines = client.dump(kind)
+        client.exit_cli(save_changes=False)
+        self._last_dump = "\n".join(lines)
+        message = f"{kind}: получено строк {len(lines)}"
+        self._log_to_console("-- " + message)
+        return message
 
     def _save_dump(self):
         if not self._last_dump:
@@ -462,27 +435,14 @@ class FcSettingsPanel(QScrollArea):
         text = self.manual_input.text().strip()
         if not text or not self._ready(True):
             return
-        first = text.lower().split()[0]
-        if first in {"save", "exit", "bl", "defaults", "dfu", "resource", "flash_erase", "reboot"}:
+        if text.lower().split()[0] in BLOCKED_COMMANDS:
             QMessageBox.warning(self, "Команда заблокирована",
                                 "Сохранение и опасные команды выполняются только кнопками выше.")
             return
-        if not self._begin(f"Команда «{text}»"):
-            return
-        client = FcCliClient(self._ws, log_callback=self._log_to_console)
-        message = ""
-        try:
-            client.enter_cli()
-            client._send_line(text)
-            client.exit_cli(save_changes=False)
-        except Exception as exc:
-            client.close()
-            message = "Операция прервана"
-            self._fail("Ошибка CLI", exc)
-        finally:
-            self._end(message)
+        self._run_cli(f"Команда «{text}»", "Ошибка CLI", "Операция прервана", lambda c: self._do_manual(c, text))
 
-    def get_limits(self, silent: bool = False) -> dict:
-        """Текущие значения параметров (silent=True - без всплывающих окон, для таймеров)."""
-        self._apply_manual_inputs(silent=silent)
-        return dict(self.limits)
+    def _do_manual(self, client, text: str) -> str:
+        client.enter_cli()
+        client.send_command(text)
+        client.exit_cli(save_changes=False)
+        return ""

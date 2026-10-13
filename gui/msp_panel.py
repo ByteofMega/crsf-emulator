@@ -43,7 +43,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from msp_codes import READ_CODES, decode, format_decoded
+from msp_codes import MSP_ATTITUDE, READ_CODES, decode, format_decoded
 
 
 def diagnose_crsf(d: dict) -> str:
@@ -122,7 +122,7 @@ class MspPanel(QWidget):
         controls.addWidget(QLabel("Код:"))
         self.code_spin = QSpinBox()
         self.code_spin.setRange(1, 199)
-        self.code_spin.setValue(108)
+        self.code_spin.setValue(MSP_ATTITUDE)
         controls.addWidget(self.code_spin)
         one_btn = QPushButton("Запросить код")
         one_btn.clicked.connect(self._request_one)
@@ -215,14 +215,14 @@ class MspPanel(QWidget):
         decoded = decode(cmd, data)
         self.table.item(row, 2).setText(format_decoded(decoded) if decoded else "(нет декодера - см. hex)")
         self.table.item(row, 3).setText(data.hex(" "))
-        if cmd == 108 and decoded:
+        if cmd == MSP_ATTITUDE and decoded:
             self._att = decoded
             self._show_att()
 
     def _show_att(self):
         if not self._att:
             return
-        age = time.monotonic() - self._last.get(108, 0.0)
+        age = time.monotonic() - self._last.get(MSP_ATTITUDE, 0.0)
         stale = "  (ДАННЫЕ УСТАРЕЛИ)" if age > 2.0 else ""
         self.att_label.setText(
             f"Крен {self._att['roll_deg']:+.1f}°   Тангаж {self._att['pitch_deg']:+.1f}°   "

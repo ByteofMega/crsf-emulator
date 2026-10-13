@@ -33,17 +33,13 @@
 #include <Arduino.h>
 
 // ---------- Wi-Fi: STA-сеть по умолчанию (используется при первом старте) ----------
-static const char* WIFI_SSID = "YOUR_WIFI";
+static const char* WIFI_SSID = "KFU.NET";
 
 // Внешний EAP-идентификатор (identity) — можно оставить таким же, как логин.
-<<<<<<< HEAD
-static const char* WIFI_EAP_IDENTITY = "YOUR_IDENTITY";
-=======
-static const char* WIFI_EAP_IDENTITY = "YOUR_LOGIN";
->>>>>>> 448b1c9 (Updated GUI and firmware)
+static const char* WIFI_EAP_IDENTITY = "YOUR_IDENTIFIER";
 
 // Логин и пароль для входа в корпоративную сеть КФУ.
-static const char* WIFI_EAP_USERNAME = "YOUR_LOGIN";
+static const char* WIFI_EAP_USERNAME = "YOUR_USERNAME";
 static const char* WIFI_EAP_PASSWORD = "YOUR_PASSWORD";
 
 // ---------- Собственная точка доступа ESP32 для ноутбука с GUI ----------
@@ -51,7 +47,7 @@ static const char* WIFI_EAP_PASSWORD = "YOUR_PASSWORD";
 // клиентов корпоративной сети. Интернет на ноутбук идёт через NAT
 // (WiFi.AP.enableNAPT), см. .ino.
 static const char* AP_SSID = "FOTON-LINK";
-static const char* AP_PASS = "YOUR_AP_PASSWORD";  // минимум 8 символов для WPA2
+static const char* AP_PASS = "foton1234";  // минимум 8 символов для WPA2
 
 #define AP_IP_1 192
 #define AP_IP_2 168

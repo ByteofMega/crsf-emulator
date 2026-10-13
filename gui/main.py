@@ -1,116 +1,63 @@
 """
-main.py - точка входа. Вкладки: Каналы, Карта, Настройки FC, MSP.
+main.py - точка входа. Вкладки: Каналы, Карта, Настройки FC, MSP, Запись полёта.
 
-Положение дрона больше НЕ берётся из GPS: оператор задаёт стартовую точку и начальный курс
-на карте, дальше положение считает DeadReckoning (position_estimator.py) по стикам RC и данным
-Betaflight из MSP (курс, статус арма, ток). Это оценка с накапливающейся ошибкой.
+Положение дрона НЕ берётся из GPS: оператор задаёт стартовую точку и начальный курс на карте, дальше положение
+считает DeadReckoning (position_estimator.py) по стикам RC и данным Betaflight из MSP. Это оценка с накапливающейся
+ошибкой.
 
-ВАЖНО: автономная навигация ("Лететь по маршруту") перекрывает ручной ввод ROLL/PITCH/YAW,
-пока не нажата "Стоп" - сначала тесты без пропеллеров / в симуляторе. Газ ведёт оператор.
+ВАЖНО: автономная навигация ("Лететь по маршруту") перекрывает ручной ввод ROLL/PITCH/YAW, пока не нажата "Стоп" -
+сначала тесты без пропеллеров / в симуляторе.
+
+Устройство (после рефакторинга MainWindow только собирает части и раздаёт им данные):
+  rc_state.py     - RcState: текущие 16 каналов;
+  navigation.py   - NavigationController: оценка положения и автономный полёт (таймеры 50 и 200 мс);
+  map_tab.py      - вкладка «Карта»;  wifi_panel.py - блок Wi-Fi;  settings_panel.py, msp_panel.py,
+  flight_panel.py - остальные вкладки;  common.py - общие функции;  config.py - константы и темы.
 
 ФУНКЦИИ И КЛАССЫ ФАЙЛА
 ----------------------
 class MainWindow
-    Главное окно приложения: подключение к ESP32, вкладки «Каналы», «Карта», «Настройки FC»,
-    «MSP», оценка положения дрона и запуск маршрута.
+    Главное окно: подключение к ESP32, тема оформления, вкладки, раздача MSP-кадров и телеметрии.
   MainWindow.__init__(self)
-    Создаёт клиент WebSocket, таймеры (оценка положения 50 мс, навигация 200 мс) и все виджеты
-    окна; восстанавливает сохранённые IP и порт из QSettings.
-  MainWindow._save_connection_settings(self, ip: str, port: int)
-    Сохраняет IP и порт ESP32 в QSettings, чтобы подставить их при следующем запуске.
-  MainWindow._toggle_connection(self)
-    Кнопка «Подключиться/Отключиться»: проверяет IP и порт и открывает или закрывает WebSocket-
-    соединение с ESP32.
-  MainWindow._on_connected(self)
-    Реакция на установленное соединение: показывает статус «Подключено» и меняет подпись кнопки.
-  MainWindow._on_disconnected(self)
-    Реакция на разрыв соединения: показывает статус и останавливает навигацию (стики
-    возвращаются в 1500).
-  MainWindow._on_error(self, message: str)
-    Показывает текст сетевой ошибки WebSocket в строке статуса.
-  MainWindow._on_cli_busy(self, busy: bool)
-    Сигнал от вкладки «Настройки FC»: пока идёт обмен с FC по CLI, кнопка запуска маршрута
-    недоступна (FC перезагружается).
-  MainWindow._on_channel_changed(self, idx: int, value: int)
-    Пользователь подвинул ползунок канала: запоминает значение и отправляет его на ESP32.
-  MainWindow._on_channels_received(self, values: list)
-    ESP32 прислала текущие значения 16 каналов: обновляет ползунки без повторной отправки и
-    запоминает значения для оценщика положения.
-  MainWindow._on_telemetry_received(self, telemetry: dict)
-    Запоминает последние данные батареи из телеметрии CRSF (резерв для оценки расхода, если нет
-    MSP_ANALOG).
-  MainWindow._on_msp(self, cmd: int, data: bytes, err: bool)
-    Обрабатывает MSP-кадры: курс из ATTITUDE (поправка оценщика), статус арма из STATUS, ток и
-    напряжение из ANALOG (оценка маршрута).
-  MainWindow._enable_start_mode(self)
-    Кнопка «Задать старт на карте»: следующий клик по карте будет стартовой точкой дрона.
-  MainWindow._on_start_set(self, lat: float, lon: float)
-    Клик оператора по карте в режиме старта: создаёт оценщик положения DeadReckoning с заданным
-    курсом и ставит метку дрона.
-  MainWindow._reset_position(self)
-    Кнопка «Сбросить позицию»: останавливает навигацию, удаляет оценщик и стирает с карты старт,
-    метку дрона и трек.
-  MainWindow._estimator_tick(self)
-    Таймер 50 мс: по текущим стикам и MSP-курсу двигает оценку положения; обновляет метку на
-    карте и скорость в окне. Дрон считается «в воздухе» при арме и газе выше порога.
-  MainWindow._on_route_updated(self, waypoints: list)
-    Карта прислала новый список точек маршрута: включает кнопку запуска и пересчитывает оценку
-    маршрута.
-  MainWindow._update_route_estimate(self)
-    Считает длину, время, повороты и расход батареи маршрута от текущей оценки положения по
-    лимитам скорости и ёмкости из настроек.
-  MainWindow._clear_route(self)
-    Кнопка «Очистить маршрут»: останавливает навигацию и удаляет все точки с карты.
-  MainWindow._send_wifi_config(self)
-    Отправляет на ESP32 новые данные Wi-Fi сети (SSID, логин, пароль) после подтверждения
-    оператора.
-  MainWindow._start_navigation(self)
-    Кнопка «Лететь по маршруту»: проверяет условия (связь, старт, маршрут, FC не занята),
-    запрашивает подтверждение, создаёт WaypointNavigator и запускает таймер навигации.
-  MainWindow._set_rc(self, idx: int, value: int)
-    Записывает значение канала в локальное состояние и отправляет его на ESP32.
-  MainWindow._stop_navigation(self)
-    Останавливает навигацию и возвращает ROLL, PITCH, YAW в нейтраль (1500).
-  MainWindow._navigation_tick(self)
-    Таймер 200 мс: навигатор по оценённому положению и курсу вычисляет значения ROLL/PITCH/YAW,
-    которые отправляются на ESP32; по завершении маршрута навигация останавливается.
+    Создаёт клиент WebSocket, общее состояние каналов, контроллер навигации и все вкладки; восстанавливает
+    IP, порт и тему из QSettings.
+  MainWindow._apply_theme(self) / _toggle_theme(self)
+    Применяет тёмную или светлую тему и запоминает выбор.
+  MainWindow._save_connection_settings(self, ip, port) / _toggle_connection(self)
+    Сохранение IP и порта; кнопка «Подключиться/Отключиться».
+  MainWindow._on_connected / _on_disconnected / _on_error
+    Реакции на события WebSocket (при разрыве навигация останавливается).
+  MainWindow._on_cli_busy(self, busy)
+    Пока идёт обмен с FC по CLI, запуск маршрута недоступен.
+  MainWindow._on_channels_received(self, values)
+    ESP32 прислала значения каналов: обновляет состояние и ползунки без повторной отправки.
+  MainWindow._on_telemetry_received(self, telemetry) / _on_msp(self, cmd, data, err)
+    Раздача телеметрии CRSF и MSP-кадров (курс и углы, статус арма, ток) нужным частям.
   MainWindow.closeEvent(self, event)
-    При закрытии окна прерывает возможный обмен с FC по CLI (чтобы процесс не завис) и сохраняет
-    IP и порт.
+    Останавливает запись/воспроизведение, прерывает обмен с FC по CLI и сохраняет IP и порт.
 main()
     Создаёт приложение Qt, показывает главное окно и запускает цикл событий.
 """
 
 import sys
-import time
 
-from PyQt6.QtCore import QSettings, QTimer
+from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QGroupBox, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPushButton, QTabWidget,
-    QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
-import cli_ws
 from channel_widgets import ChannelPanel
-from config import CHANNEL_NAMES, DEFAULT_IP, DEFAULT_PORT, DEFAULT_VALUES, STYLESHEET
-from map_view import MapView
-from msp_codes import decode
+from config import DEFAULT_IP, DEFAULT_PORT, DEFAULT_THEME, build_stylesheet
+from flight_panel import FlightPanel
+from map_tab import MapTab
+from msp_codes import MSP_ANALOG, MSP_ATTITUDE, MSP_STATUS, MSP_STATUS_EX, decode
 from msp_panel import MspPanel
-from position_estimator import DeadReckoning
-from route_planner import WaypointNavigator, estimate_energy_usage
+from navigation import NavigationController
+from rc_state import RcState
 from settings_panel import FcSettingsPanel
 from telemetry_panel import TelemetryPanel
+from wifi_panel import WifiPanel
 from ws_client import CrsfWsClient
-
-ROLL_IDX = CHANNEL_NAMES.index("ROLL")
-PITCH_IDX = CHANNEL_NAMES.index("PITCH")
-THROTTLE_IDX = CHANNEL_NAMES.index("THROTTLE")
-YAW_IDX = CHANNEL_NAMES.index("YAW")
-
-NAV_TICK_MS = 200
-EST_TICK_MS = 50
-MAP_EVERY_N_TICKS = 4
 
 SETTINGS_ORG = "CRSFEmulator"
 SETTINGS_APP = "GUI"
@@ -121,11 +68,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ФОТОН - ELRS CRSF Emulator / ESP32 WebSocket GUI")
         self.resize(900, 980)
-        self.setStyleSheet(STYLESHEET)
 
         self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         saved_ip = self._settings.value("connection/ip", DEFAULT_IP, type=str)
         saved_port = self._settings.value("connection/port", DEFAULT_PORT, type=int)
+        self._theme = self._settings.value("ui/theme", DEFAULT_THEME, type=str)
+        if self._theme not in ("dark", "light"):
+            self._theme = DEFAULT_THEME
 
         self.ws_client = CrsfWsClient(self)
         self.ws_client.connected.connect(self._on_connected)
@@ -135,25 +84,10 @@ class MainWindow(QMainWindow):
         self.ws_client.telemetry_received.connect(self._on_telemetry_received)
         self.ws_client.msp_received.connect(self._on_msp)
 
-        self._rc = list(DEFAULT_VALUES)
-        self._est = None
-        self._est_last = time.monotonic()
-        self._est_ticks = 0
-        self._msp_yaw = None
-        self._armed = None
-        self._analog = None
-        self._last_battery = None
-        self._pending_route: list = []
-        self._navigator = None
-        self._cli_busy = False
-
-        self._nav_timer = QTimer(self)
-        self._nav_timer.setInterval(NAV_TICK_MS)
-        self._nav_timer.timeout.connect(self._navigation_tick)
-        self._est_timer = QTimer(self)
-        self._est_timer.setInterval(EST_TICK_MS)
-        self._est_timer.timeout.connect(self._estimator_tick)
-        self._est_timer.start()
+        self.rc = RcState(self.ws_client)
+        self.settings_panel = FcSettingsPanel(self.ws_client, nav_active=lambda: self.nav.is_running)
+        self.settings_panel.busy_changed.connect(self._on_cli_busy)
+        self.nav = NavigationController(self.ws_client, self.rc, self.settings_panel.get_limits, self)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -168,113 +102,57 @@ class MainWindow(QMainWindow):
         self.port_input.setFixedWidth(60)
         conn_layout.addWidget(self.port_input)
         self.connect_btn = QPushButton("Подключиться")
+        self.connect_btn.setObjectName("primary")
         self.connect_btn.clicked.connect(self._toggle_connection)
         conn_layout.addWidget(self.connect_btn)
+        self.theme_btn = QPushButton()
+        self.theme_btn.setObjectName("themeBtn")
+        self.theme_btn.setToolTip("Переключить тёмную / светлую тему")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        conn_layout.addWidget(self.theme_btn)
         root_layout.addLayout(conn_layout)
 
         self.status_label = QLabel("Не подключено")
         self.status_label.setObjectName("statusLabel")
         root_layout.addWidget(self.status_label)
 
-        # --- Wi-Fi сеть ESP32 (STA/интернет) ---
-        wifi_box = QGroupBox("Настройка Wi-Fi сети ESP32 (интернет)")
-        wifi_form = QFormLayout(wifi_box)
-        self.wifi_enterprise_check = QCheckBox("WPA2-Enterprise (логин/пароль)")
-        self.wifi_enterprise_check.setChecked(True)
-        wifi_form.addRow(self.wifi_enterprise_check)
-        self.wifi_ssid_input = QLineEdit()
-        self.wifi_ssid_input.setPlaceholderText("Например: KFU.NET или домашний Wi-Fi")
-        wifi_form.addRow("SSID сети:", self.wifi_ssid_input)
-        self.wifi_identity_input = QLineEdit()
-        self.wifi_identity_input.setPlaceholderText("Можно оставить пустым (= логин)")
-        wifi_form.addRow("EAP identity (только Enterprise):", self.wifi_identity_input)
-        self.wifi_username_input = QLineEdit()
-        wifi_form.addRow("Логин (только Enterprise):", self.wifi_username_input)
-        self.wifi_password_input = QLineEdit()
-        self.wifi_password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        wifi_form.addRow("Пароль:", self.wifi_password_input)
-        self.wifi_send_btn = QPushButton("Отправить сеть на ESP32")
-        self.wifi_send_btn.clicked.connect(self._send_wifi_config)
-        wifi_form.addRow(self.wifi_send_btn)
-        self.wifi_status_label = QLabel("")
-        self.wifi_status_label.setWordWrap(True)
-        wifi_form.addRow(self.wifi_status_label)
-        root_layout.addWidget(wifi_box)
+        root_layout.addWidget(WifiPanel(self.ws_client))
 
         tabs = QTabWidget()
         root_layout.addWidget(tabs)
 
-        # --- Каналы ---
         channels_tab = QWidget()
         channels_layout = QVBoxLayout(channels_tab)
         self.telemetry_panel = TelemetryPanel()
         self.ws_client.telemetry_received.connect(self.telemetry_panel.update_telemetry)
         channels_layout.addWidget(self.telemetry_panel)
         self.channel_panel = ChannelPanel()
-        self.channel_panel.value_changed.connect(self._on_channel_changed)
+        self.channel_panel.value_changed.connect(self.rc.set)
         channels_layout.addWidget(self.channel_panel)
         tabs.addTab(channels_tab, "Каналы")
 
-        # --- Карта ---
-        map_tab = QWidget()
-        map_layout = QVBoxLayout(map_tab)
-        self.map_view = MapView()
-        self.map_view.bridge.route_updated.connect(self._on_route_updated)
-        self.map_view.bridge.start_set.connect(self._on_start_set)
-        map_layout.addWidget(self.map_view)
-
-        start_layout = QHBoxLayout()
-        self.set_start_btn = QPushButton("Задать старт на карте")
-        self.set_start_btn.clicked.connect(self._enable_start_mode)
-        start_layout.addWidget(self.set_start_btn)
-        start_layout.addWidget(QLabel("Курс дрона на старте, ° от севера:"))
-        self.start_heading_input = QLineEdit("0")
-        self.start_heading_input.setFixedWidth(60)
-        start_layout.addWidget(self.start_heading_input)
-        self.reset_pos_btn = QPushButton("Сбросить позицию")
-        self.reset_pos_btn.clicked.connect(self._reset_position)
-        start_layout.addWidget(self.reset_pos_btn)
-        self.pos_label = QLabel("Старт не задан: нажмите кнопку и кликните по карте")
-        start_layout.addWidget(self.pos_label)
-        map_layout.addLayout(start_layout)
-
-        nav_controls = QHBoxLayout()
-        self.route_status_label = QLabel("Кликайте по карте: каждый клик - новая точка маршрута")
-        nav_controls.addWidget(self.route_status_label)
-        self.start_nav_btn = QPushButton("Лететь по маршруту")
-        self.start_nav_btn.setEnabled(False)
-        self.start_nav_btn.clicked.connect(self._start_navigation)
-        nav_controls.addWidget(self.start_nav_btn)
-        self.stop_nav_btn = QPushButton("Стоп")
-        self.stop_nav_btn.setEnabled(False)
-        self.stop_nav_btn.clicked.connect(self._stop_navigation)
-        nav_controls.addWidget(self.stop_nav_btn)
-        self.clear_route_btn = QPushButton("Очистить маршрут")
-        self.clear_route_btn.clicked.connect(self._clear_route)
-        nav_controls.addWidget(self.clear_route_btn)
-        map_layout.addLayout(nav_controls)
-
-        energy_box = QGroupBox("Оценка маршрута")
-        energy_form = QFormLayout(energy_box)
-        self.route_distance_label = QLabel("-")
-        self.route_time_label = QLabel("-")
-        self.route_turns_label = QLabel("-")
-        self.route_energy_label = QLabel("-")
-        self.speed_label = QLabel("-")
-        energy_form.addRow("Оценка скорости дрона:", self.speed_label)
-        energy_form.addRow("Длина маршрута:", self.route_distance_label)
-        energy_form.addRow("Примерное время полёта:", self.route_time_label)
-        energy_form.addRow("Из них на развороты:", self.route_turns_label)
-        energy_form.addRow("Примерный расход батареи:", self.route_energy_label)
-        map_layout.addWidget(energy_box)
-        tabs.addTab(map_tab, "Карта")
-
-        # --- Настройки FC (CLI через ESP32) и MSP ---
-        self.settings_panel = FcSettingsPanel(self.ws_client, nav_active=lambda: self._navigator is not None)
-        self.settings_panel.busy_changed.connect(self._on_cli_busy)
+        self.flight_panel = FlightPanel(
+            self.ws_client, lambda: self.rc.values, self.rc.set, lambda: self.nav.is_running,
+            self.channel_panel.set_all_silent)
+        self.map_tab = MapTab(self.nav, self.settings_panel.get_limits, self.flight_panel.is_active, self.ws_client)
+        tabs.addTab(self.map_tab, "Карта")
         tabs.addTab(self.settings_panel, "Настройки FC")
         self.msp_panel = MspPanel(self.ws_client)
         tabs.addTab(self.msp_panel, "MSP")
+        tabs.addTab(self.flight_panel, "Запись полёта")
+
+        self._apply_theme()
+
+    # ---------- тема оформления ----------
+    def _apply_theme(self):
+        self.setStyleSheet(build_stylesheet(self._theme))
+        self.theme_btn.setText("☀  Светлая тема" if self._theme == "dark" else "☾  Тёмная тема")
+        self.map_tab.set_theme(self._theme == "dark")
+
+    def _toggle_theme(self):
+        self._theme = "light" if self._theme == "dark" else "dark"
+        self._settings.setValue("ui/theme", self._theme)
+        self._apply_theme()
 
     # ---------- подключение ----------
     def _save_connection_settings(self, ip: str, port: int):
@@ -302,30 +180,25 @@ class MainWindow(QMainWindow):
     def _on_disconnected(self):
         self.status_label.setText("Отключено")
         self.connect_btn.setText("Подключиться")
-        self._stop_navigation()
+        self.nav.stop()
 
     def _on_error(self, message: str):
         self.status_label.setText(f"Ошибка: {message}")
 
     # ---------- обмен с FC по CLI: блокируется только запуск маршрута ----------
     def _on_cli_busy(self, busy: bool):
-        self._cli_busy = busy
-        self.start_nav_btn.setEnabled((not busy) and bool(self._pending_route) and self._navigator is None)
+        self.map_tab.set_cli_busy(busy)
 
     # ---------- каналы ----------
-    def _on_channel_changed(self, idx: int, value: int):
-        self._rc[idx] = value
-        self.ws_client.send_channel(idx, value)
-
     def _on_channels_received(self, values: list):
-        self._rc = list(values)
+        self.rc.replace(values)
         self.channel_panel.set_all_silent(values)
 
     # ---------- телеметрия CRSF и MSP ----------
     def _on_telemetry_received(self, telemetry: dict):
         battery = telemetry.get("battery")
         if battery:
-            self._last_battery = battery
+            self.map_tab.on_battery(battery)
 
     def _on_msp(self, cmd: int, data: bytes, err: bool):
         if err:
@@ -333,210 +206,17 @@ class MainWindow(QMainWindow):
         d = decode(cmd, data)
         if not d:
             return
-        if cmd == 108:
-            self._msp_yaw = d["yaw_deg"]
-            if self._est is not None:
-                self._est.set_msp_yaw(self._msp_yaw)
-        elif cmd in (101, 150):
-            self._armed = d["armed"]
-        elif cmd == 110:
-            self._analog = d
-            self._update_route_estimate()
-
-    # ---------- старт и положение ----------
-    def _enable_start_mode(self):
-        self.pos_label.setText("Кликните по карте: там стоит дрон")
-        self.map_view.enable_start_mode()
-
-    def _on_start_set(self, lat: float, lon: float):
-        try:
-            heading = float(self.start_heading_input.text().replace(",", ".")) % 360.0
-        except ValueError:
-            QMessageBox.warning(self, "Курс", "Курс на старте должен быть числом (0 = север, 90 = восток).")
-            heading = 0.0
-        lim = self.settings_panel.get_limits(silent=True)
-        self._est = DeadReckoning(
-            lat, lon, heading, kd=lim["drag_kd"], angle_limit_deg=lim["max_tilt_deg"],
-            deadband_us=lim["rc_deadband_us"], yaw_rate_dps=lim["yaw_rate_dps"], yaw_raw=self._msp_yaw)
-        self.map_view.clear_track()
-        self.map_view.update_drone_position(lat, lon)
-        self.pos_label.setText(f"Старт: {lat:.6f}, {lon:.6f}, курс {heading:.0f}°")
-        self._update_route_estimate()
-
-    def _reset_position(self):
-        self._stop_navigation()
-        self._est = None
-        self.map_view.clear_start()  # стирает старт, метку дрона и трек
-        self.pos_label.setText("Старт не задан: нажмите кнопку и кликните по карте")
-        self.speed_label.setText("-")
-        self._update_route_estimate()
-
-    def _estimator_tick(self):
-        now = time.monotonic()
-        dt = now - self._est_last
-        self._est_last = now
-        if self._est is None:
-            return
-        lim = self.settings_panel.get_limits(silent=True)
-        self._est.set_params(lim["drag_kd"], lim["max_tilt_deg"], lim["rc_deadband_us"], lim["yaw_rate_dps"])
-        armed = self._armed if self._armed is not None else True
-        airborne = armed and self._rc[THROTTLE_IDX] > lim["liftoff_throttle_us"]
-        lat, lon, speed = self._est.update(self._rc[PITCH_IDX], self._rc[ROLL_IDX], self._rc[YAW_IDX], dt, airborne)
-        self._est_ticks += 1
-        if self._est_ticks % MAP_EVERY_N_TICKS == 0:
-            self.map_view.update_drone_position(lat, lon)
-            state = "в воздухе" if airborne else "на земле"
-            self.speed_label.setText(f"{speed:.1f} м/с, курс {self._est.psi:.0f}° ({state})")
-
-    # ---------- маршрут ----------
-    def _on_route_updated(self, waypoints: list):
-        self._pending_route = waypoints
-        self.start_nav_btn.setEnabled(len(waypoints) > 0 and not self._cli_busy)
-        if waypoints:
-            self.route_status_label.setText(f"Точек в маршруте: {len(waypoints)} (финиш - точка №{len(waypoints)})")
-        else:
-            self.route_status_label.setText("Кликайте по карте: каждый клик - новая точка маршрута")
-        self._update_route_estimate()
-
-    def _update_route_estimate(self):
-        if not self._pending_route:
-            for lbl in (self.route_distance_label, self.route_time_label,
-                        self.route_turns_label, self.route_energy_label):
-                lbl.setText("-")
-            return
-
-        path = list(self._pending_route)
-        if self._est is not None:
-            path = [(self._est.lat, self._est.lon)] + path
-
-        limits = self.settings_panel.get_limits(silent=True)
-        max_speed = limits.get("max_speed_mps", 5.0)
-        yaw_rate_dps = limits.get("yaw_rate_dps", 180.0)
-        capacity_mah = limits.get("battery_capacity_mah", 0.0)
-
-        if self._analog is not None:
-            current_a = self._analog.get("current_a", 0.0)
-        elif self._last_battery is not None:
-            current_a = self._last_battery.get("current_a", 0.0)
-        else:
-            current_a = 0.0
-
-        result = estimate_energy_usage(path, max_speed, current_a, capacity_mah, yaw_rate_dps)
-        if result is None:
-            self.route_distance_label.setText("-")
-            self.route_time_label.setText("Ошибка: макс. скорость должна быть > 0")
-            self.route_turns_label.setText("-")
-            self.route_energy_label.setText("-")
-            return
-
-        self.route_distance_label.setText(f"{result['distance_m']:.0f} м")
-        self.route_time_label.setText(f"{result['time_s'] / 60.0:.1f} мин (при скорости {max_speed:.1f} м/с)")
-        if result["turn_count"] > 0:
-            self.route_turns_label.setText(
-                f"~{result['turn_time_s'] / 60.0:.1f} мин в {result['turn_count']} точках "
-                f"(при скорости разворота {yaw_rate_dps:.0f} °/с)")
-        else:
-            self.route_turns_label.setText("Поворотов нет")
-
-        if current_a <= 0.0:
-            self.route_energy_label.setText("Нет данных о токе - оценка недоступна, пока дрон не в полёте")
-        elif result["percent_of_capacity"] is not None:
-            self.route_energy_label.setText(
-                f"~{result['consumed_mah']:.0f} мАч (~{result['percent_of_capacity']:.1f}% ёмкости, "
-                f"по текущему току {current_a:.1f} А)")
-        else:
-            self.route_energy_label.setText(f"~{result['consumed_mah']:.0f} мАч (ёмкость батареи не задана)")
-
-    def _clear_route(self):
-        """Сбросить маршрут на карте и в состоянии Python (через _on_route_updated)."""
-        if self._navigator is not None:
-            self._stop_navigation()
-        self.map_view.clear_route()
-
-    def _send_wifi_config(self):
-        if not self.ws_client.is_connected():
-            QMessageBox.warning(self, "Нет соединения",
-                                "Сначала подключитесь к точке доступа ESP32 и нажмите «Подключиться» выше.")
-            return
-        ssid = self.wifi_ssid_input.text().strip()
-        if not ssid:
-            QMessageBox.warning(self, "Нет SSID", "Введите имя сети (SSID).")
-            return
-        confirm = QMessageBox.question(
-            self, "Подтверждение",
-            f"Отправить на ESP32 новые данные сети \"{ssid}\"? "
-            "ESP32 попробует переподключиться, точка доступа для GUI не отключится.")
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-        sent = self.ws_client.send_wifi_config(
-            ssid, self.wifi_identity_input.text().strip(), self.wifi_username_input.text().strip(),
-            self.wifi_password_input.text(), self.wifi_enterprise_check.isChecked())
-        if sent:
-            self.wifi_status_label.setText(f"Отправлено на ESP32: SSID=\"{ssid}\".")
-        else:
-            self.wifi_status_label.setText("Не удалось отправить - нет соединения с ESP32.")
-
-    # ---------- навигация ----------
-    def _start_navigation(self):
-        if self._cli_busy:
-            QMessageBox.warning(self, "FC занята", "Идёт обмен с FC по CLI (она перезагружается). Дождитесь окончания.")
-            return
-        if not self.ws_client.is_connected():
-            QMessageBox.warning(self, "Нет соединения", "Сначала подключитесь к ESP32.")
-            return
-        if self._est is None:
-            QMessageBox.warning(self, "Нет старта", "Сначала задайте стартовую точку дрона на карте.")
-            return
-        if not self._pending_route:
-            QMessageBox.warning(self, "Нет маршрута", "Сначала выберите точки на карте.")
-            return
-        confirm = QMessageBox.question(
-            self, "Подтверждение",
-            f"Маршрут из {len(self._pending_route)} точек. Автономный полёт перекроет ручное управление "
-            "ROLL/PITCH/YAW до нажатия «Стоп». Положение дрона - ОЦЕНКА без GPS, ошибка растёт со временем. "
-            "Дрон в ANGLE-режиме, газ держите вручную. Продолжить?")
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-        lim = self.settings_panel.get_limits()
-        self._navigator = WaypointNavigator(
-            waypoints=list(self._pending_route), max_speed_mps=lim["max_speed_mps"], kd=lim["drag_kd"],
-            angle_limit_deg=lim["max_tilt_deg"], deadband_us=lim["rc_deadband_us"],
-            arrival_radius_m=lim.get("arrival_radius_m", 3.0))
-        self._nav_timer.start()
-        self.start_nav_btn.setEnabled(False)
-        self.stop_nav_btn.setEnabled(True)
-        self.route_status_label.setText(f"Навигация запущена (0/{len(self._pending_route)})...")
-
-    def _set_rc(self, idx: int, value: int):
-        self._rc[idx] = value
-        self.ws_client.send_channel(idx, value)
-
-    def _stop_navigation(self):
-        self._nav_timer.stop()
-        self._navigator = None
-        self.start_nav_btn.setEnabled(len(self._pending_route) > 0 and not self._cli_busy)
-        self.stop_nav_btn.setEnabled(False)
-        self.route_status_label.setText("Навигация остановлена")
-        if self.ws_client.is_connected():
-            for idx in (ROLL_IDX, PITCH_IDX, YAW_IDX):
-                self._set_rc(idx, 1500)
-
-    def _navigation_tick(self):
-        if self._navigator is None or self._est is None:
-            return
-        roll_us, pitch_us, yaw_us, finished = self._navigator.update(self._est.lat, self._est.lon, self._est.psi)
-        self._set_rc(ROLL_IDX, roll_us)
-        self._set_rc(PITCH_IDX, pitch_us)
-        self._set_rc(YAW_IDX, yaw_us)
-        if not finished:
-            current, total = self._navigator.progress()
-            self.route_status_label.setText(f"Навигация запущена ({current}/{total})...")
-        else:
-            self.route_status_label.setText("Маршрут завершён")
-            self._stop_navigation()
+        if cmd == MSP_ATTITUDE:
+            self.nav.set_msp_yaw(d["yaw_deg"])
+            self.flight_panel.on_attitude(d["roll_deg"], d["pitch_deg"], d["yaw_deg"])
+        elif cmd in (MSP_STATUS, MSP_STATUS_EX):
+            self.nav.set_armed(d["armed"])
+        elif cmd == MSP_ANALOG:
+            self.map_tab.on_analog(d)
 
     def closeEvent(self, event):
-        cli_ws.request_abort()      # прервать возможный обмен с FC, чтобы процесс не завис при выходе
+        self.flight_panel.stop_all()
+        self.settings_panel.abort()     # прервать возможный обмен с FC, чтобы процесс не завис при выходе
         ip = self.ip_input.text().strip()
         port_text = self.port_input.text().strip()
         if ip and port_text.isdigit():

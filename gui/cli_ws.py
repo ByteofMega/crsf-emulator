@@ -17,10 +17,6 @@
 ----------------------
 class CliAborted
     Исключение: обмен с FC прерван (например, закрыто окно приложения).
-request_abort()
-    Выставляет флаг прерывания: все ожидания ответа CLI завершатся исключением CliAborted.
-reset_abort()
-    Сбрасывает флаг прерывания перед новой операцией.
 parse_vars(lines: list)
     Из строк ответа CLI извлекает пары «имя = значение»; числовые значения проверяются по строке
     «Allowed range: a - b» и отбрасываются, если выходят из диапазона (признак помехи).
@@ -61,6 +57,10 @@ class FcCliClient
   FcCliClient._wait_msp_frame(self, max_s: float, newer_than: float)
     Ждёт MSP-кадр от FC, пришедший позже заданного момента: признак, что FC жива (до входа в
     CLI) или снова загрузилась (после exit или save).
+  FcCliClient.abort(self)
+    Прерывает обмен этого клиента: ближайшее ожидание ответа бросит CliAborted (закрытие окна).
+  FcCliClient.send_command(self, line: str)
+    Ручная команда CLI с выводом в журнал и повтором при искажённом эхо; возвращает строки ответа.
   FcCliClient.close(self)
     Отписывается от вывода CLI и, если режим CLI ещё включён, просит ESP32 вернуться в MSP.
   FcCliClient.enter_cli(self)
@@ -112,21 +112,8 @@ NO_PROMPT_QUIET_S = 0.6   # приглашения нет, но поток за�
 MSP_ALIVE_WAIT_S = 8.0    # сколько ждать MSP-кадр перед входом в CLI
 MSP_RETURN_WAIT_S = 12.0  # сколько ждать возврата MSP после exit/save (перезагрузка FC)
 
-ABORT = False
-
-
 class CliAborted(RuntimeError):
     """Обмен прерван (закрытие окна)."""
-
-
-def request_abort():
-    global ABORT
-    ABORT = True
-
-
-def reset_abort():
-    global ABORT
-    ABORT = False
 
 
 def parse_vars(lines: list) -> dict:
@@ -180,6 +167,7 @@ class FcCliClient:
         self._buf = ""
         self._got = False
         self._last = 0.0
+        self._aborted = False
         self.retries_used = 0
         self.exchanges = 0
         self._ws.cli_output.connect(self._on_out)
@@ -198,7 +186,7 @@ class FcCliClient:
 
     def _pump(self, ms: int = 20):
         """Обработать события GUI (окно остаётся живым). Прерывается при закрытии окна и обрыве связи."""
-        if ABORT:
+        if self._aborted:
             raise CliAborted("обмен прерван")
         if not self._ws.is_connected():
             raise RuntimeError("Соединение с ESP32 потеряно")
@@ -270,6 +258,14 @@ class FcCliClient:
             pass
         if self._ws.cli_mode:
             self._ws.cli_leave()
+
+    def abort(self):
+        """Прервать обмен (например, при закрытии окна): ожидания бросят CliAborted."""
+        self._aborted = True
+
+    def send_command(self, line: str) -> list:
+        """Ручная команда CLI (публичная обёртка над _send_line)."""
+        return self._send_line(line)
 
     # ---------- вход / выход ----------
     def enter_cli(self):

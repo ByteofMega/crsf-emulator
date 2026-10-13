@@ -95,7 +95,18 @@ class MapView(QWebEngineView):
 
         port = _find_free_port()
         self._server = _start_local_server(GUI_DIR, port)
+        self._dark = True
+        self.loadFinished.connect(lambda _ok: self._push_theme())
         self.load(QUrl(f"http://127.0.0.1:{port}/map.html"))
+
+    def set_theme(self, dark: bool):
+        """Тёмная или светлая карта (подложка инвертируется в map.html)."""
+        self._dark = dark
+        self._push_theme()
+
+    def _push_theme(self):
+        self.page().runJavaScript(
+            f"if (typeof setTheme === 'function') {{ setTheme({str(self._dark).lower()}); }}")
 
     def update_drone_position(self, lat: float, lon: float):
         """Новая (расчётная) позиция дрона: маркер и трек."""
